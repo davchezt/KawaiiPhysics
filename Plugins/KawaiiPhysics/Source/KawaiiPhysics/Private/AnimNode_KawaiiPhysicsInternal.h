@@ -19,7 +19,7 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_ApplySyncBone"), STAT_KawaiiPhysic
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_AdjustByCollision"), STAT_KawaiiPhysics_AdjustByCollision, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_AdjustByBoneConstraint"), STAT_KawaiiPhysics_AdjustByBoneConstraint, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdateSphericalLimit"), STAT_KawaiiPhysics_UpdateSphericalLimit, STATGROUP_Anim, KAWAIIPHYSICS_API);
-DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdatePlanerLimit"), STAT_KawaiiPhysics_UpdatePlanerLimit, STATGROUP_Anim, KAWAIIPHYSICS_API);
+DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdatePlanarLimit"), STAT_KawaiiPhysics_UpdatePlanarLimit, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_WarmUp"), STAT_KawaiiPhysics_WarmUp, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdatePhysicsSetting"), STAT_KawaiiPhysics_UpdatePhysicsSetting, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdateCapsuleLimit"), STAT_KawaiiPhysics_UpdateCapsuleLimit, STATGROUP_Anim, KAWAIIPHYSICS_API);
@@ -35,6 +35,8 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_ConvertSimulationSpace"), STAT_Kaw
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_InitializeSharedCollision"), STAT_KawaiiPhysics_InitializeSharedCollision, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_WriteSharedCollisionToSubsystem"), STAT_KawaiiPhysics_WriteSharedCollisionToSubsystem, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdateSharedCollisionLimits"), STAT_KawaiiPhysics_UpdateSharedCollisionLimits, STATGROUP_Anim, KAWAIIPHYSICS_API);
+// ノード側のシンプルワールドコリジョン読み取り（UpdateSimpleWorldCollisionLimits）専用 / Node-side Simple World Collision read (UpdateSimpleWorldCollisionLimits)
+DECLARE_CYCLE_STAT_EXTERN(TEXT("KawaiiPhysics_UpdateSimpleWorldCollisionLimits"), STAT_KawaiiPhysics_UpdateSimpleWorldCollisionLimits, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumModifyBones"), STAT_KawaiiPhysics_NumModifyBones, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumInterBoneDummyBones"), STAT_KawaiiPhysics_NumInterBoneDummyBones, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumBridgeDummyBones"), STAT_KawaiiPhysics_NumBridgeDummyBones, STATGROUP_Anim, KAWAIIPHYSICS_API);
@@ -52,9 +54,49 @@ DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumTaperedCapsuleColliders
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumBoxColliders"), STAT_KawaiiPhysics_NumBoxColliders, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumPlanarColliders"), STAT_KawaiiPhysics_NumPlanarColliders, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumSharedColliders"), STAT_KawaiiPhysics_NumSharedColliders, STATGROUP_Anim, KAWAIIPHYSICS_API);
+DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumSimpleWorldColliders"), STAT_KawaiiPhysics_NumSimpleWorldColliders, STATGROUP_Anim, KAWAIIPHYSICS_API);
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumMergedBoneConstraints"), STAT_KawaiiPhysics_NumMergedBoneConstraints, STATGROUP_Anim, KAWAIIPHYSICS_API);
 // 毎フレームに発行したワールドコリジョンのスイープ回数（anim threadからの同期トレース） / World-collision sweeps issued per frame (sync traces from the anim thread)
 DECLARE_DWORD_COUNTER_STAT_EXTERN(TEXT("KawaiiPhysics_NumWorldCollisionChecks"), STAT_KawaiiPhysics_NumWorldCollisionChecks, STATGROUP_Anim, KAWAIIPHYSICS_API);
 
 // ModifyBones / MergedBoneConstraints のアロケーション量（subdivision/bridge dummyによる膨張の可視化） / Allocated size of ModifyBones / MergedBoneConstraints (visualize growth from subdivision/bridge dummies)
 DECLARE_MEMORY_STAT_EXTERN(TEXT("KawaiiPhysics_ModifyBonesMemory"), STAT_KawaiiPhysics_ModifyBonesMemory, STATGROUP_Anim, KAWAIIPHYSICS_API);
+
+KAWAIIPHYSICS_API int32 GetKawaiiPhysicsSharedPublisherReaderReleaseMaxAge();
+KAWAIIPHYSICS_API int32 GetKawaiiPhysicsSharedPublisherAutoResolveInterval();
+
+namespace KawaiiPhysicsSimpleWorldReadPath
+{
+	// 共有コリジョンデータをシミュレーション空間配列へ追加する / Appends shared collision data to simulation-space arrays
+	KAWAIIPHYSICS_API void AppendSharedCollisionDataToSimulationSpace(
+		const FAnimNode_KawaiiPhysics& Node,
+		FComponentSpacePoseContext& Output,
+		EKawaiiPhysicsSimulationSpace TargetSpace,
+		const FKawaiiPhysicsSharedCollisionData& InData,
+		TArray<FSphericalLimit>& OutSphericalLimits,
+		TArray<FCapsuleLimit>& OutCapsuleLimits,
+		TArray<FTaperedCapsuleLimit>& OutTaperedCapsuleLimits,
+		TArray<FBoxLimit>& OutBoxLimits,
+		TArray<FPlanarLimit>* OutPlanarLimits,
+		TArray<FKawaiiPhysicsConvexLimit>* OutConvexLimits);
+
+	// 既存配列の要素数が一致する場合だけ in-place でシミュレーション空間へ再変換する / Refreshes simulation-space arrays in place only when element counts match
+	KAWAIIPHYSICS_API bool RefreshSimulationSpaceLimitsInPlace(
+		const FAnimNode_KawaiiPhysics& Node,
+		FComponentSpacePoseContext& Output,
+		EKawaiiPhysicsSimulationSpace TargetSpace,
+		const FKawaiiPhysicsSharedCollisionData& InData,
+		TArray<FSphericalLimit>& OutSphericalLimits,
+		TArray<FCapsuleLimit>& OutCapsuleLimits,
+		TArray<FTaperedCapsuleLimit>& OutTaperedCapsuleLimits,
+		TArray<FBoxLimit>& OutBoxLimits,
+		TArray<FKawaiiPhysicsConvexLimit>& OutConvexLimits);
+
+	// Box 配列だけを in-place でシミュレーション空間へ再変換する / Refreshes only box limits in simulation space in place
+	KAWAIIPHYSICS_API bool RefreshSimulationSpaceLimitsInPlace(
+		const FAnimNode_KawaiiPhysics& Node,
+		FComponentSpacePoseContext& Output,
+		EKawaiiPhysicsSimulationSpace TargetSpace,
+		const TArray<FBoxLimit>& InBoxLimits,
+		TArray<FBoxLimit>& OutBoxLimits);
+}

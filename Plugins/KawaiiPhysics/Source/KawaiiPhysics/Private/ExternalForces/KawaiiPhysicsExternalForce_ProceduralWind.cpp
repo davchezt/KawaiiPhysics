@@ -25,8 +25,8 @@ FVector SafeDirectionOrForward(const FVector& InVector)
 	return Normalized.IsNearlyZero() ? FVector::ForwardVector : Normalized;
 }
 
-// アクティブな gust envelope を経過時間から評価する（0 → Strength → 0 の線形 rise/decay）。
-// Strength/RiseTime/DecayTime は TriggerProceduralWindGust API 経由で ActiveGust にセットされる
+// アクティブな gust envelope を経過時間から評価する（線形 rise → hold → 線形 decay の台形エンベロープ）。
+// Strength/RiseTime/DecayTime/HoldTime は StartProceduralWindGust API 経由で ActiveGust にセットされる
 float EvaluateActiveGust(const FKawaiiProceduralWindActiveGust& ActiveGust, const float InTime)
 {
 	if (!ActiveGust.bIsActive)
@@ -41,11 +41,18 @@ float EvaluateActiveGust(const FKawaiiProceduralWindActiveGust& ActiveGust, cons
 	}
 
 	const float RiseTime = FMath::Max(ActiveGust.RiseTime, 0.0f);
+	const float HoldTime = FMath::Max(ActiveGust.HoldTime, 0.0f);
 	const float DecayTime = FMath::Max(ActiveGust.DecayTime, 0.0f);
 	// rise フェーズ: 0 から Strength へ線形に立ち上がる
 	if (RiseTime > KINDA_SMALL_NUMBER && ElapsedTime < RiseTime)
 	{
 		return ActiveGust.Strength * (ElapsedTime / RiseTime);
+	}
+
+	// hold フェーズ: Strength を維持する
+	if (ElapsedTime < RiseTime + HoldTime)
+	{
+		return ActiveGust.Strength;
 	}
 
 	// DecayTime が実質ゼロならここで即終了（ゼロ除算防止）
@@ -55,7 +62,7 @@ float EvaluateActiveGust(const FKawaiiProceduralWindActiveGust& ActiveGust, cons
 	}
 
 	// decay フェーズ: Strength から 0 へ線形に収束
-	const float DecayElapsedTime = ElapsedTime - RiseTime;
+	const float DecayElapsedTime = ElapsedTime - RiseTime - HoldTime;
 	if (DecayElapsedTime < DecayTime)
 	{
 		return ActiveGust.Strength * (1.0f - DecayElapsedTime / DecayTime);
@@ -105,12 +112,12 @@ FVector ApplyConeNoiseToDirection(const FVector& InDirection, const float NoiseX
 float ComputeDebugTotalRate(const FKawaiiPhysics_ExternalForce_ProceduralWind& Force, const float Total)
 {
 	// パラメータ設定から起こりうる最大振幅を基準値として概算する
-	const float MaxSine = FMath::Abs(Force.SteadyForce) + FMath::Abs(Force.OscillationForce) +
-		FMath::Abs(Force.WaveAmplitude);
-	const float MaxEnvelope = FMath::Max(FMath::Abs(Force.EnvelopeMin), FMath::Abs(Force.EnvelopeMax));
+	const float MaxSine = FMath::Abs(Force.ConstantForce) + FMath::Abs(Force.SwayForce) +
+		FMath::Abs(Force.RippleForce);
+	const float MaxStrengthCycle = FMath::Max(FMath::Abs(Force.StrengthCycleRange.Min), FMath::Abs(Force.StrengthCycleRange.Max));
 	const float MaxRandom = FMath::Abs(Force.RandomForce);
 	// 基準値が0にならないよう下限1.0を保証（ゼロ除算防止）
-	const float Reference = FMath::Max(MaxSine * MaxEnvelope + MaxRandom, 1.0f);
+	const float Reference = FMath::Max(MaxSine * MaxStrengthCycle + MaxRandom, 1.0f);
 	return FMath::Abs(Total) / Reference;
 }
 
@@ -118,10 +125,11 @@ void InitializeRuntimeStateContents(FKawaiiProceduralWindRuntimeState& State)
 {
 	State.PendingParams.Reset();
 	State.PendingGust.Reset();
+	State.PendingGustStop.Reset();
 	State.Time = 0.0f;
 	State.ActiveGust = FKawaiiProceduralWindActiveGust();
-	State.CachedSinesWithoutWave = 0.0f;
-	State.CachedEnvelope = 1.0f;
+	State.CachedSinesWithoutRipple = 0.0f;
+	State.CachedStrengthCycle = 1.0f;
 	State.CachedRandom = 0.0f;
 	State.CachedGust = 0.0f;
 	State.CachedWindVector = FVector::ZeroVector;
@@ -148,80 +156,80 @@ void MergePendingDynamicParams(FKawaiiProceduralWindDynamicParams& PendingParams
 		PendingParams.bOverrideWindDirection = true;
 		PendingParams.WindDirection = IncomingParams.WindDirection;
 	}
-	if (IncomingParams.bOverrideSteadyForce)
+	if (IncomingParams.bOverrideConstantForce)
 	{
-		PendingParams.bOverrideSteadyForce = true;
-		PendingParams.SteadyForce = IncomingParams.SteadyForce;
+		PendingParams.bOverrideConstantForce = true;
+		PendingParams.ConstantForce = IncomingParams.ConstantForce;
 	}
-	if (IncomingParams.bOverrideOscillationForce)
+	if (IncomingParams.bOverrideSwayForce)
 	{
-		PendingParams.bOverrideOscillationForce = true;
-		PendingParams.OscillationForce = IncomingParams.OscillationForce;
+		PendingParams.bOverrideSwayForce = true;
+		PendingParams.SwayForce = IncomingParams.SwayForce;
 	}
-	if (IncomingParams.bOverrideOscillationPeriod)
+	if (IncomingParams.bOverrideSwayPeriod)
 	{
-		PendingParams.bOverrideOscillationPeriod = true;
-		PendingParams.OscillationPeriod = IncomingParams.OscillationPeriod;
+		PendingParams.bOverrideSwayPeriod = true;
+		PendingParams.SwayPeriod = IncomingParams.SwayPeriod;
 	}
-	if (IncomingParams.bOverrideWaveAmplitude)
+	if (IncomingParams.bOverrideSwayPhaseOffset)
 	{
-		PendingParams.bOverrideWaveAmplitude = true;
-		PendingParams.WaveAmplitude = IncomingParams.WaveAmplitude;
+		PendingParams.bOverrideSwayPhaseOffset = true;
+		PendingParams.SwayPhaseOffset = IncomingParams.SwayPhaseOffset;
 	}
-	if (IncomingParams.bOverrideWavePeriod)
+	if (IncomingParams.bOverrideRippleForce)
 	{
-		PendingParams.bOverrideWavePeriod = true;
-		PendingParams.WavePeriod = IncomingParams.WavePeriod;
+		PendingParams.bOverrideRippleForce = true;
+		PendingParams.RippleForce = IncomingParams.RippleForce;
 	}
-	if (IncomingParams.bOverrideWavePhase)
+	if (IncomingParams.bOverrideRipplePeriod)
 	{
-		PendingParams.bOverrideWavePhase = true;
-		PendingParams.WavePhase = IncomingParams.WavePhase;
+		PendingParams.bOverrideRipplePeriod = true;
+		PendingParams.RipplePeriod = IncomingParams.RipplePeriod;
 	}
-	if (IncomingParams.bOverrideWaveSpatialOffset)
+	if (IncomingParams.bOverrideRipplePhaseOffset)
 	{
-		PendingParams.bOverrideWaveSpatialOffset = true;
-		PendingParams.WaveSpatialOffset = IncomingParams.WaveSpatialOffset;
+		PendingParams.bOverrideRipplePhaseOffset = true;
+		PendingParams.RipplePhaseOffset = IncomingParams.RipplePhaseOffset;
 	}
-	if (IncomingParams.bOverrideEnvelopeMax)
+	if (IncomingParams.bOverrideRippleTipPhaseDelay)
 	{
-		PendingParams.bOverrideEnvelopeMax = true;
-		PendingParams.EnvelopeMax = IncomingParams.EnvelopeMax;
+		PendingParams.bOverrideRippleTipPhaseDelay = true;
+		PendingParams.RippleTipPhaseDelay = IncomingParams.RippleTipPhaseDelay;
 	}
-	if (IncomingParams.bOverrideEnvelopeMin)
+	if (IncomingParams.bOverrideStrengthCycleRange)
 	{
-		PendingParams.bOverrideEnvelopeMin = true;
-		PendingParams.EnvelopeMin = IncomingParams.EnvelopeMin;
+		PendingParams.bOverrideStrengthCycleRange = true;
+		PendingParams.StrengthCycleRange = IncomingParams.StrengthCycleRange;
 	}
-	if (IncomingParams.bOverrideEnvelopeFrequency)
+	if (IncomingParams.bOverrideStrengthCyclePeriod)
 	{
-		PendingParams.bOverrideEnvelopeFrequency = true;
-		PendingParams.EnvelopeFrequency = IncomingParams.EnvelopeFrequency;
+		PendingParams.bOverrideStrengthCyclePeriod = true;
+		PendingParams.StrengthCyclePeriod = IncomingParams.StrengthCyclePeriod;
 	}
-	if (IncomingParams.bOverrideEnvelopePhase)
+	if (IncomingParams.bOverrideStrengthCyclePhaseOffset)
 	{
-		PendingParams.bOverrideEnvelopePhase = true;
-		PendingParams.EnvelopePhase = IncomingParams.EnvelopePhase;
+		PendingParams.bOverrideStrengthCyclePhaseOffset = true;
+		PendingParams.StrengthCyclePhaseOffset = IncomingParams.StrengthCyclePhaseOffset;
 	}
 	if (IncomingParams.bOverrideRandomForce)
 	{
 		PendingParams.bOverrideRandomForce = true;
 		PendingParams.RandomForce = IncomingParams.RandomForce;
 	}
-	if (IncomingParams.bOverrideRandomPeriod)
+	if (IncomingParams.bOverrideRandomForcePeriod)
 	{
-		PendingParams.bOverrideRandomPeriod = true;
-		PendingParams.RandomPeriod = IncomingParams.RandomPeriod;
+		PendingParams.bOverrideRandomForcePeriod = true;
+		PendingParams.RandomForcePeriod = IncomingParams.RandomForcePeriod;
 	}
-	if (IncomingParams.bOverrideDirectionNoiseAngle)
+	if (IncomingParams.bOverrideWindDirectionNoiseAngle)
 	{
-		PendingParams.bOverrideDirectionNoiseAngle = true;
-		PendingParams.DirectionNoiseAngle = IncomingParams.DirectionNoiseAngle;
+		PendingParams.bOverrideWindDirectionNoiseAngle = true;
+		PendingParams.WindDirectionNoiseAngle = IncomingParams.WindDirectionNoiseAngle;
 	}
-	if (IncomingParams.bOverrideDirectionNoisePeriod)
+	if (IncomingParams.bOverrideWindDirectionNoisePeriod)
 	{
-		PendingParams.bOverrideDirectionNoisePeriod = true;
-		PendingParams.DirectionNoisePeriod = IncomingParams.DirectionNoisePeriod;
+		PendingParams.bOverrideWindDirectionNoisePeriod = true;
+		PendingParams.WindDirectionNoisePeriod = IncomingParams.WindDirectionNoisePeriod;
 	}
 	if (IncomingParams.bOverrideTimeScale)
 	{
@@ -234,6 +242,8 @@ void MergePendingDynamicParams(FKawaiiProceduralWindDynamicParams& PendingParams
 FKawaiiPhysics_ExternalForce_ProceduralWind::FKawaiiPhysics_ExternalForce_ProceduralWind()
 {
 	bCanSelectForceSpace = true;
+	// 固有の Random 系列と紛らわしく、使用すると Seed の再現性も壊れるため基底の RandomForceScaleRange は非表示にする
+	bSupportsRandomForceScaleRange = false;
 	ExternalForceSpace = EExternalForceSpace::WorldSpace;
 	RuntimeState = MakeShared<FKawaiiProceduralWindRuntimeState, ESPMode::ThreadSafe>();
 	InitializeRuntimeStateContents(*RuntimeState);
@@ -256,25 +266,26 @@ FKawaiiPhysics_ExternalForce_ProceduralWind& FKawaiiPhysics_ExternalForce_Proced
 
 	static_cast<FKawaiiPhysics_ExternalForce&>(*this) = static_cast<const FKawaiiPhysics_ExternalForce&>(Other);
 
+	ParameterMode = Other.ParameterMode;
 	WindDirection = Other.WindDirection;
-	DirectionNoiseAngle = Other.DirectionNoiseAngle;
-	DirectionNoisePeriod = Other.DirectionNoisePeriod;
+	WindDirectionNoiseAngle = Other.WindDirectionNoiseAngle;
+	WindDirectionNoisePeriod = Other.WindDirectionNoisePeriod;
 	TimeScale = Other.TimeScale;
 	ForceRateByBoneLengthRate = Other.ForceRateByBoneLengthRate;
-	SteadyForce = Other.SteadyForce;
-	OscillationForce = Other.OscillationForce;
-	OscillationPeriod = Other.OscillationPeriod;
-	WaveAmplitude = Other.WaveAmplitude;
-	WavePeriod = Other.WavePeriod;
-	WavePhase = Other.WavePhase;
-	WaveSpatialOffset = Other.WaveSpatialOffset;
-	EnvelopeMax = Other.EnvelopeMax;
-	EnvelopeMin = Other.EnvelopeMin;
-	EnvelopeFrequency = Other.EnvelopeFrequency;
-	EnvelopePhase = Other.EnvelopePhase;
+	ConstantForce = Other.ConstantForce;
+	SwayForce = Other.SwayForce;
+	SwayPeriod = Other.SwayPeriod;
+	SwayPhaseOffset = Other.SwayPhaseOffset;
+	RippleForce = Other.RippleForce;
+	RipplePeriod = Other.RipplePeriod;
+	RipplePhaseOffset = Other.RipplePhaseOffset;
+	RippleTipPhaseDelay = Other.RippleTipPhaseDelay;
+	StrengthCycleRange = Other.StrengthCycleRange;
+	StrengthCyclePeriod = Other.StrengthCyclePeriod;
+	StrengthCyclePhaseOffset = Other.StrengthCyclePhaseOffset;
 	RandomForce = Other.RandomForce;
-	RandomPeriod = Other.RandomPeriod;
-	RandomSeed = Other.RandomSeed;
+	RandomForcePeriod = Other.RandomForcePeriod;
+	Seed = Other.Seed;
 
 	// RuntimeState はインスタンス間でコピー・共有しない。代入先が有効な RuntimeState を持つ場合はポインタと中身（Time/ActiveGust/PendingParams）を保持し、
 	// Persona の CopyNodeDataToPreviewNode などのインプレース同期でシミュレーション時刻をリセットしない。無効な代入先だけ新規生成する。
@@ -318,65 +329,66 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::ApplyDynamicParams(
 	{
 		WindDirection = Params.WindDirection;
 	}
-	if (Params.bOverrideSteadyForce)
+	if (Params.bOverrideConstantForce)
 	{
-		SteadyForce = FMath::Max(Params.SteadyForce, 0.0f);
+		ConstantForce = FMath::Max(Params.ConstantForce, 0.0f);
 	}
-	if (Params.bOverrideOscillationForce)
+	if (Params.bOverrideSwayForce)
 	{
-		OscillationForce = FMath::Max(Params.OscillationForce, 0.0f);
+		SwayForce = FMath::Max(Params.SwayForce, 0.0f);
 	}
-	if (Params.bOverrideOscillationPeriod)
+	if (Params.bOverrideSwayPeriod)
 	{
-		OscillationPeriod = FMath::Max(Params.OscillationPeriod, 0.01f);
+		SwayPeriod = FMath::Max(Params.SwayPeriod, 0.01f);
 	}
-	if (Params.bOverrideWaveAmplitude)
+	if (Params.bOverrideSwayPhaseOffset)
 	{
-		WaveAmplitude = FMath::Max(Params.WaveAmplitude, 0.0f);
+		SwayPhaseOffset = Params.SwayPhaseOffset;
 	}
-	if (Params.bOverrideWavePeriod)
+	if (Params.bOverrideRippleForce)
 	{
-		WavePeriod = FMath::Max(Params.WavePeriod, 0.01f);
+		RippleForce = FMath::Max(Params.RippleForce, 0.0f);
 	}
-	if (Params.bOverrideWavePhase)
+	if (Params.bOverrideRipplePeriod)
 	{
-		WavePhase = Params.WavePhase;
+		RipplePeriod = FMath::Max(Params.RipplePeriod, 0.01f);
 	}
-	if (Params.bOverrideWaveSpatialOffset)
+	if (Params.bOverrideRipplePhaseOffset)
 	{
-		WaveSpatialOffset = Params.WaveSpatialOffset;
+		RipplePhaseOffset = Params.RipplePhaseOffset;
 	}
-	if (Params.bOverrideEnvelopeMax)
+	if (Params.bOverrideRippleTipPhaseDelay)
 	{
-		EnvelopeMax = FMath::Max(Params.EnvelopeMax, 0.0f);
+		RippleTipPhaseDelay = Params.RippleTipPhaseDelay;
 	}
-	if (Params.bOverrideEnvelopeMin)
+	if (Params.bOverrideStrengthCycleRange)
 	{
-		EnvelopeMin = FMath::Max(Params.EnvelopeMin, 0.0f);
+		StrengthCycleRange.Min = FMath::Max(Params.StrengthCycleRange.Min, 0.0f);
+		StrengthCycleRange.Max = FMath::Max(Params.StrengthCycleRange.Max, 0.0f);
 	}
-	if (Params.bOverrideEnvelopeFrequency)
+	if (Params.bOverrideStrengthCyclePeriod)
 	{
-		EnvelopeFrequency = FMath::Max(Params.EnvelopeFrequency, 0.0f);
+		StrengthCyclePeriod = FMath::Max(Params.StrengthCyclePeriod, 0.01f);
 	}
-	if (Params.bOverrideEnvelopePhase)
+	if (Params.bOverrideStrengthCyclePhaseOffset)
 	{
-		EnvelopePhase = Params.EnvelopePhase;
+		StrengthCyclePhaseOffset = Params.StrengthCyclePhaseOffset;
 	}
 	if (Params.bOverrideRandomForce)
 	{
 		RandomForce = FMath::Max(Params.RandomForce, 0.0f);
 	}
-	if (Params.bOverrideRandomPeriod)
+	if (Params.bOverrideRandomForcePeriod)
 	{
-		RandomPeriod = FMath::Max(Params.RandomPeriod, 0.01f);
+		RandomForcePeriod = FMath::Max(Params.RandomForcePeriod, 0.01f);
 	}
-	if (Params.bOverrideDirectionNoiseAngle)
+	if (Params.bOverrideWindDirectionNoiseAngle)
 	{
-		DirectionNoiseAngle = FMath::Max(Params.DirectionNoiseAngle, 0.0f);
+		WindDirectionNoiseAngle = FMath::Max(Params.WindDirectionNoiseAngle, 0.0f);
 	}
-	if (Params.bOverrideDirectionNoisePeriod)
+	if (Params.bOverrideWindDirectionNoisePeriod)
 	{
-		DirectionNoisePeriod = FMath::Max(Params.DirectionNoisePeriod, 0.01f);
+		WindDirectionNoisePeriod = FMath::Max(Params.WindDirectionNoisePeriod, 0.01f);
 	}
 	if (Params.bOverrideTimeScale)
 	{
@@ -402,70 +414,70 @@ bool FKawaiiPhysics_ExternalForce_ProceduralWind::BuildDynamicParamsForProperty(
 		OutParams.WindDirection = WindDirection;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, SteadyForce))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, ConstantForce))
 	{
-		OutParams.bOverrideSteadyForce = true;
-		OutParams.SteadyForce = SteadyForce;
+		OutParams.bOverrideConstantForce = true;
+		OutParams.ConstantForce = ConstantForce;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, OscillationForce))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, SwayForce))
 	{
-		OutParams.bOverrideOscillationForce = true;
-		OutParams.OscillationForce = OscillationForce;
+		OutParams.bOverrideSwayForce = true;
+		OutParams.SwayForce = SwayForce;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, OscillationPeriod))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, SwayPeriod))
 	{
-		OutParams.bOverrideOscillationPeriod = true;
-		OutParams.OscillationPeriod = OscillationPeriod;
+		OutParams.bOverrideSwayPeriod = true;
+		OutParams.SwayPeriod = SwayPeriod;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WaveAmplitude))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, SwayPhaseOffset))
 	{
-		OutParams.bOverrideWaveAmplitude = true;
-		OutParams.WaveAmplitude = WaveAmplitude;
+		OutParams.bOverrideSwayPhaseOffset = true;
+		OutParams.SwayPhaseOffset = SwayPhaseOffset;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WavePeriod))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RippleForce))
 	{
-		OutParams.bOverrideWavePeriod = true;
-		OutParams.WavePeriod = WavePeriod;
+		OutParams.bOverrideRippleForce = true;
+		OutParams.RippleForce = RippleForce;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WavePhase))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RipplePeriod))
 	{
-		OutParams.bOverrideWavePhase = true;
-		OutParams.WavePhase = WavePhase;
+		OutParams.bOverrideRipplePeriod = true;
+		OutParams.RipplePeriod = RipplePeriod;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WaveSpatialOffset))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RipplePhaseOffset))
 	{
-		OutParams.bOverrideWaveSpatialOffset = true;
-		OutParams.WaveSpatialOffset = WaveSpatialOffset;
+		OutParams.bOverrideRipplePhaseOffset = true;
+		OutParams.RipplePhaseOffset = RipplePhaseOffset;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, EnvelopeMax))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RippleTipPhaseDelay))
 	{
-		OutParams.bOverrideEnvelopeMax = true;
-		OutParams.EnvelopeMax = EnvelopeMax;
+		OutParams.bOverrideRippleTipPhaseDelay = true;
+		OutParams.RippleTipPhaseDelay = RippleTipPhaseDelay;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, EnvelopeMin))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, StrengthCycleRange))
 	{
-		OutParams.bOverrideEnvelopeMin = true;
-		OutParams.EnvelopeMin = EnvelopeMin;
+		OutParams.bOverrideStrengthCycleRange = true;
+		OutParams.StrengthCycleRange = StrengthCycleRange;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, EnvelopeFrequency))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, StrengthCyclePeriod))
 	{
-		OutParams.bOverrideEnvelopeFrequency = true;
-		OutParams.EnvelopeFrequency = EnvelopeFrequency;
+		OutParams.bOverrideStrengthCyclePeriod = true;
+		OutParams.StrengthCyclePeriod = StrengthCyclePeriod;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, EnvelopePhase))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, StrengthCyclePhaseOffset))
 	{
-		OutParams.bOverrideEnvelopePhase = true;
-		OutParams.EnvelopePhase = EnvelopePhase;
+		OutParams.bOverrideStrengthCyclePhaseOffset = true;
+		OutParams.StrengthCyclePhaseOffset = StrengthCyclePhaseOffset;
 		return true;
 	}
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RandomForce))
@@ -474,22 +486,22 @@ bool FKawaiiPhysics_ExternalForce_ProceduralWind::BuildDynamicParamsForProperty(
 		OutParams.RandomForce = RandomForce;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RandomPeriod))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, RandomForcePeriod))
 	{
-		OutParams.bOverrideRandomPeriod = true;
-		OutParams.RandomPeriod = RandomPeriod;
+		OutParams.bOverrideRandomForcePeriod = true;
+		OutParams.RandomForcePeriod = RandomForcePeriod;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, DirectionNoiseAngle))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WindDirectionNoiseAngle))
 	{
-		OutParams.bOverrideDirectionNoiseAngle = true;
-		OutParams.DirectionNoiseAngle = DirectionNoiseAngle;
+		OutParams.bOverrideWindDirectionNoiseAngle = true;
+		OutParams.WindDirectionNoiseAngle = WindDirectionNoiseAngle;
 		return true;
 	}
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, DirectionNoisePeriod))
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, WindDirectionNoisePeriod))
 	{
-		OutParams.bOverrideDirectionNoisePeriod = true;
-		OutParams.DirectionNoisePeriod = DirectionNoisePeriod;
+		OutParams.bOverrideWindDirectionNoisePeriod = true;
+		OutParams.WindDirectionNoisePeriod = WindDirectionNoisePeriod;
 		return true;
 	}
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(FKawaiiPhysics_ExternalForce_ProceduralWind, TimeScale))
@@ -510,38 +522,50 @@ FKawaiiProceduralWindDynamicParams FKawaiiPhysics_ExternalForce_ProceduralWind::
 	Params.bIsEnabled = bIsEnabled;
 	Params.bOverrideWindDirection = true;
 	Params.WindDirection = WindDirection;
-	Params.bOverrideSteadyForce = true;
-	Params.SteadyForce = SteadyForce;
-	Params.bOverrideOscillationForce = true;
-	Params.OscillationForce = OscillationForce;
-	Params.bOverrideOscillationPeriod = true;
-	Params.OscillationPeriod = OscillationPeriod;
-	Params.bOverrideWaveAmplitude = true;
-	Params.WaveAmplitude = WaveAmplitude;
-	Params.bOverrideWavePeriod = true;
-	Params.WavePeriod = WavePeriod;
-	Params.bOverrideWavePhase = true;
-	Params.WavePhase = WavePhase;
-	Params.bOverrideWaveSpatialOffset = true;
-	Params.WaveSpatialOffset = WaveSpatialOffset;
-	Params.bOverrideEnvelopeMax = true;
-	Params.EnvelopeMax = EnvelopeMax;
-	Params.bOverrideEnvelopeMin = true;
-	Params.EnvelopeMin = EnvelopeMin;
-	Params.bOverrideEnvelopeFrequency = true;
-	Params.EnvelopeFrequency = EnvelopeFrequency;
-	Params.bOverrideEnvelopePhase = true;
-	Params.EnvelopePhase = EnvelopePhase;
+	Params.bOverrideConstantForce = true;
+	Params.ConstantForce = ConstantForce;
+	Params.bOverrideSwayForce = true;
+	Params.SwayForce = SwayForce;
+	Params.bOverrideSwayPeriod = true;
+	Params.SwayPeriod = SwayPeriod;
+	Params.bOverrideSwayPhaseOffset = true;
+	Params.SwayPhaseOffset = SwayPhaseOffset;
+	Params.bOverrideRippleForce = true;
+	Params.RippleForce = RippleForce;
+	Params.bOverrideRipplePeriod = true;
+	Params.RipplePeriod = RipplePeriod;
+	Params.bOverrideRipplePhaseOffset = true;
+	Params.RipplePhaseOffset = RipplePhaseOffset;
+	Params.bOverrideRippleTipPhaseDelay = true;
+	Params.RippleTipPhaseDelay = RippleTipPhaseDelay;
+	Params.bOverrideStrengthCycleRange = true;
+	Params.StrengthCycleRange = StrengthCycleRange;
+	Params.bOverrideStrengthCyclePeriod = true;
+	Params.StrengthCyclePeriod = StrengthCyclePeriod;
+	Params.bOverrideStrengthCyclePhaseOffset = true;
+	Params.StrengthCyclePhaseOffset = StrengthCyclePhaseOffset;
 	Params.bOverrideRandomForce = true;
 	Params.RandomForce = RandomForce;
-	Params.bOverrideRandomPeriod = true;
-	Params.RandomPeriod = RandomPeriod;
-	Params.bOverrideDirectionNoiseAngle = true;
-	Params.DirectionNoiseAngle = DirectionNoiseAngle;
-	Params.bOverrideDirectionNoisePeriod = true;
-	Params.DirectionNoisePeriod = DirectionNoisePeriod;
+	Params.bOverrideRandomForcePeriod = true;
+	Params.RandomForcePeriod = RandomForcePeriod;
+	Params.bOverrideWindDirectionNoiseAngle = true;
+	Params.WindDirectionNoiseAngle = WindDirectionNoiseAngle;
+	Params.bOverrideWindDirectionNoisePeriod = true;
+	Params.WindDirectionNoisePeriod = WindDirectionNoisePeriod;
 	Params.bOverrideTimeScale = true;
 	Params.TimeScale = TimeScale;
+
+	// consume前のPendingParamsがあれば上乗せし、Set直後・PreApply前のGetでも指定済みの値を返す（read-your-writes）。
+	// PendingParamsはここでは消費しない（Resetしない）
+	if (RuntimeState.IsValid())
+	{
+		FScopeLock Lock(&RuntimeState->Mutex);
+		if (RuntimeState->PendingParams.IsSet())
+		{
+			MergePendingDynamicParams(Params, RuntimeState->PendingParams.GetValue());
+		}
+	}
+
 	return Params;
 }
 
@@ -563,15 +587,24 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::RequestDynamicParams(
 
 // 突風要求を PendingGust として積み、次回 PreApply で反映する
 void FKawaiiPhysics_ExternalForce_ProceduralWind::RequestGust(
-	const float Strength, const float RiseTime, const float DecayTime)
+	const float Strength, const float RiseTime, const float DecayTime, const float HoldTime)
 {
 	const TSharedPtr<FKawaiiProceduralWindRuntimeState, ESPMode::ThreadSafe> LocalRuntimeState = EnsureRuntimeState();
 	FScopeLock Lock(&LocalRuntimeState->Mutex);
 	LocalRuntimeState->PendingGust = FKawaiiProceduralWindGustRequest{
 		Strength,
 		RiseTime,
-		DecayTime
+		DecayTime,
+		HoldTime
 	};
+}
+
+// アクティブな突風の早期停止要求を PendingGustStop として積み、次回 PreApply で反映する
+void FKawaiiPhysics_ExternalForce_ProceduralWind::RequestGustStop(const float BlendOutTime)
+{
+	const TSharedPtr<FKawaiiProceduralWindRuntimeState, ESPMode::ThreadSafe> LocalRuntimeState = EnsureRuntimeState();
+	FScopeLock Lock(&LocalRuntimeState->Mutex);
+	LocalRuntimeState->PendingGustStop = BlendOutTime;
 }
 
 // 他スレッド（Game Thread の BP API など）から積まれた Pending 要求を Worker 側の PreApply で取り込む。
@@ -600,8 +633,33 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::ConsumePendingRequests()
 		LocalRuntimeState->ActiveGust.Strength = PendingGust.Strength;
 		LocalRuntimeState->ActiveGust.RiseTime = PendingGust.RiseTime;
 		LocalRuntimeState->ActiveGust.DecayTime = PendingGust.DecayTime;
+		LocalRuntimeState->ActiveGust.HoldTime = PendingGust.HoldTime;
 		LocalRuntimeState->ActiveGust.bIsActive = true;
 		LocalRuntimeState->PendingGust.Reset();
+	}
+
+	// gust 停止要求は起動要求の後に処理し、同フレームでは停止を優先する
+	if (LocalRuntimeState->PendingGustStop.IsSet())
+	{
+		const float BlendOutTime = LocalRuntimeState->PendingGustStop.GetValue();
+		if (LocalRuntimeState->ActiveGust.bIsActive)
+		{
+			if (BlendOutTime <= KINDA_SMALL_NUMBER)
+			{
+				LocalRuntimeState->ActiveGust.bIsActive = false;
+			}
+			else
+			{
+				const float CurrentGust = EvaluateActiveGust(LocalRuntimeState->ActiveGust, LocalRuntimeState->Time);
+				LocalRuntimeState->ActiveGust.StartTime = LocalRuntimeState->Time;
+				LocalRuntimeState->ActiveGust.Strength = CurrentGust;
+				LocalRuntimeState->ActiveGust.RiseTime = 0.0f;
+				LocalRuntimeState->ActiveGust.DecayTime = BlendOutTime;
+				LocalRuntimeState->ActiveGust.HoldTime = 0.0f;
+				LocalRuntimeState->ActiveGust.bIsActive = true;
+			}
+		}
+		LocalRuntimeState->PendingGustStop.Reset();
 	}
 }
 
@@ -614,23 +672,24 @@ FKawaiiPhysicsProceduralWindSample FKawaiiPhysics_ExternalForce_ProceduralWind::
 	FKawaiiPhysicsProceduralWindSample Sample;
 
 	// 周期パラメータのゼロ除算防止クランプ
-	const float SafeOscillationPeriod = FMath::Max(OscillationPeriod, 0.01f);
-	const float SafeWavePeriod = FMath::Max(WavePeriod, 0.01f);
-	const float SafeRandomPeriod = FMath::Max(RandomPeriod, 0.01f);
+	const float SafeSwayPeriod = FMath::Max(SwayPeriod, 0.01f);
+	const float SafeRipplePeriod = FMath::Max(RipplePeriod, 0.01f);
+	const float SafeRandomForcePeriod = FMath::Max(RandomForcePeriod, 0.01f);
+	const float SafeStrengthCyclePeriod = FMath::Max(StrengthCyclePeriod, 0.01f);
 
-	// 定常成分
-	Sample.Steady = SteadyForce;
-	// 周期振動成分
-	Sample.Oscillation = OscillationForce * FMath::Sin(TwoPi * InTime / SafeOscillationPeriod);
-	// ボーン列に沿って伝わる空間波。InLengthRate（毛先方向の距離率）ぶんだけ位相をずらし、根元から毛先へ
+	// 定常(Constant)成分
+	Sample.Constant = ConstantForce;
+	// 一斉揺れ(Sway)成分（周期的な押し引き）。SwayPhaseOffset で開始位相をずらせる（既定0で従来と同一）
+	Sample.Sway = SwayForce * FMath::Sin(TwoPi * InTime / SafeSwayPeriod + FMath::DegreesToRadians(SwayPhaseOffset));
+	// ボーン列に沿って伝わる波揺れ(Ripple)。InLengthRate（毛先方向の距離率）ぶんだけ位相をずらし、根元から毛先へ
 	// 波が伝播しているように見せる
-	Sample.Wave = WaveAmplitude * FMath::Sin(TwoPi * InTime / SafeWavePeriod -
-		FMath::DegreesToRadians(InLengthRate * WaveSpatialOffset) + FMath::DegreesToRadians(WavePhase));
-	// 低周波の強弱うねり（envelope）。sin を [0,1] に正規化してから EnvelopeMin-Max 間を補間する
-	Sample.Envelope = FMath::Lerp(EnvelopeMin, EnvelopeMax,
-		0.5f * (1.0f + FMath::Sin(TwoPi * EnvelopeFrequency * InTime + FMath::DegreesToRadians(EnvelopePhase))));
-	// seeded smooth noise によるランダム成分。同一 RandomSeed なら実行のたびに同じ揺らぎを再現する
-	Sample.Random = RandomForce * SampleSmoothNoise(InTime / SafeRandomPeriod, RandomSeed, 0);
+	Sample.Ripple = RippleForce * FMath::Sin(TwoPi * InTime / SafeRipplePeriod -
+		FMath::DegreesToRadians(InLengthRate * RippleTipPhaseDelay) + FMath::DegreesToRadians(RipplePhaseOffset));
+	// 低周波の強弱サイクル(StrengthCycle)変調。sin を [0,1] に正規化してから StrengthCycleRange の Min-Max 間を補間する
+	Sample.StrengthCycle = FMath::Lerp(StrengthCycleRange.Min, StrengthCycleRange.Max,
+		0.5f * (1.0f + FMath::Sin(TwoPi * InTime / SafeStrengthCyclePeriod + FMath::DegreesToRadians(StrengthCyclePhaseOffset))));
+	// seeded smooth noise によるランダム成分。同一 Seed なら実行のたびに同じ揺らぎを再現する
+	Sample.Random = RandomForce * SampleSmoothNoise(InTime / SafeRandomForcePeriod, Seed, 0);
 
 	// アクティブな gust があれば加算
 	if (RuntimeState.IsValid())
@@ -638,8 +697,8 @@ FKawaiiPhysicsProceduralWindSample FKawaiiPhysics_ExternalForce_ProceduralWind::
 		Sample.Gust = EvaluateActiveGust(RuntimeState->ActiveGust, InTime);
 	}
 
-	// 最終合成: (定常 + 振動 + 波) × envelope + random + gust
-	Sample.Total = (Sample.Steady + Sample.Oscillation + Sample.Wave) * Sample.Envelope +
+	// 最終合成: (定常 + 一斉揺れ + 波揺れ) × 強弱サイクル + random + gust
+	Sample.Total = (Sample.Constant + Sample.Sway + Sample.Ripple) * Sample.StrengthCycle +
 		Sample.Random + Sample.Gust;
 	return Sample;
 }
@@ -647,8 +706,8 @@ FKawaiiPhysicsProceduralWindSample FKawaiiPhysics_ExternalForce_ProceduralWind::
 // (Seed, GridIndex, Channel) から決定論的なハッシュ値を作る（FNV-1aベースのミックス + fmix32相当の追加撹拌）。
 // RandomStream の内部状態を跨いで持ち回さず、都度この値から種を作ることで実行順序やスレッドに依存しない
 // 再現性を持たせている
-uint32 FKawaiiPhysics_ExternalForce_ProceduralWind::StableHash(const int32 Seed, const int32 GridIndex,
-                                                               const int32 Channel)
+uint32 FKawaiiPhysics_ExternalForce_ProceduralWind::ComputeStableHash(const int32 Seed, const int32 GridIndex,
+                                                                      const int32 Channel)
 {
 	// FNV-1a
 	uint32 Hash = 0x811C9DC5u;
@@ -668,12 +727,12 @@ uint32 FKawaiiPhysics_ExternalForce_ProceduralWind::StableHash(const int32 Seed,
 	return Hash;
 }
 
-// グリッド点 GridIndex における疑似ランダム値 [-1, 1] を返す。StableHash を種にすることで、
+// グリッド点 GridIndex における疑似ランダム値 [-1, 1] を返す。ComputeStableHash を種にすることで、
 // 呼び出し順序に関係なく同じ GridIndex なら常に同じ値になる
-float FKawaiiPhysics_ExternalForce_ProceduralWind::NoiseValueAt(const int32 GridIndex, const int32 Seed,
-                                                                const int32 Channel)
+float FKawaiiPhysics_ExternalForce_ProceduralWind::SampleNoiseAt(const int32 GridIndex, const int32 Seed,
+                                                                 const int32 Channel)
 {
-	FRandomStream RandomStream(StableHash(Seed, GridIndex, Channel));
+	FRandomStream RandomStream(ComputeStableHash(Seed, GridIndex, Channel));
 	return RandomStream.FRandRange(-1.0f, 1.0f);
 }
 
@@ -689,8 +748,8 @@ float FKawaiiPhysics_ExternalForce_ProceduralWind::SampleSmoothNoise(const float
 	const float SmoothAlpha = Alpha * Alpha * (3.0f - 2.0f * Alpha);
 
 	// 隣接グリッド点のランダム値を補間して返す
-	return FMath::Lerp(NoiseValueAt(GridIndex, Seed, Channel),
-	                   NoiseValueAt(GridIndex + 1, Seed, Channel), SmoothAlpha);
+	return FMath::Lerp(SampleNoiseAt(GridIndex, Seed, Channel),
+	                   SampleNoiseAt(GridIndex + 1, Seed, Channel), SmoothAlpha);
 }
 
 void FKawaiiPhysics_ExternalForce_ProceduralWind::Initialize(const FAnimationInitializeContext& Context)
@@ -718,25 +777,25 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::PreApply(FAnimNode_KawaiiPhysi
 	// TimeScale を考慮したシミュレーション内時間を進める
 	RuntimeState->Time += Node.GetStepDeltaTime() * TimeScale;
 
-	// ボーンに依存しない成分（Steady/Oscillation/Envelope/Random/Gust）はここで1回だけ計算してキャッシュする。
-	// Apply は全ボーンで呼ばれるため、毎ボーン再計算しないための最適化（Waveのみボーン依存で Apply 側が再計算する）
+	// ボーンに依存しない成分（Constant/Sway/StrengthCycle/Random/Gust）はここで1回だけ計算してキャッシュする。
+	// Apply は全ボーンで呼ばれるため、毎ボーン再計算しないための最適化（Rippleのみボーン依存で Apply 側が再計算する）
 	const FKawaiiPhysicsProceduralWindSample Sample = ComputeWindSample(RuntimeState->Time, 0.0f);
-	RuntimeState->CachedSinesWithoutWave = Sample.Steady + Sample.Oscillation;
-	RuntimeState->CachedEnvelope = Sample.Envelope;
+	RuntimeState->CachedSinesWithoutRipple = Sample.Constant + Sample.Sway;
+	RuntimeState->CachedStrengthCycle = Sample.StrengthCycle;
 	RuntimeState->CachedRandom = Sample.Random;
 	RuntimeState->CachedGust = Sample.Gust;
 
-	// 風向きに円錐状の揺らぎを加える（DirectionNoiseAngle>0のときのみ）。X/Y で異なる Channel を使い、
+	// 風向きに円錐状の揺らぎを加える（WindDirectionNoiseAngle>0のときのみ）。X/Y で異なる Channel を使い、
 	// 独立した2軸のノイズ系列にする
 	const FVector BaseWindDirection = SafeDirectionOrForward(WindDirection);
 	FVector NoisyWindDirection = BaseWindDirection;
-	if (DirectionNoiseAngle > 0.0f)
+	if (WindDirectionNoiseAngle > 0.0f)
 	{
-		const float SafeDirectionNoisePeriod = FMath::Max(DirectionNoisePeriod, 0.01f);
-		const float DirectionNoiseU = RuntimeState->Time / SafeDirectionNoisePeriod;
-		const float NoiseX = SampleSmoothNoise(DirectionNoiseU, RandomSeed, 1);
-		const float NoiseY = SampleSmoothNoise(DirectionNoiseU, RandomSeed, 2);
-		NoisyWindDirection = ApplyConeNoiseToDirection(BaseWindDirection, NoiseX, NoiseY, DirectionNoiseAngle);
+		const float SafeWindDirectionNoisePeriod = FMath::Max(WindDirectionNoisePeriod, 0.01f);
+		const float DirectionNoiseU = RuntimeState->Time / SafeWindDirectionNoisePeriod;
+		const float NoiseX = SampleSmoothNoise(DirectionNoiseU, Seed, 1);
+		const float NoiseY = SampleSmoothNoise(DirectionNoiseU, Seed, 2);
+		NoisyWindDirection = ApplyConeNoiseToDirection(BaseWindDirection, NoiseX, NoiseY, WindDirectionNoiseAngle);
 	}
 	// シミュレーション空間へ変換してフレーム単位でキャッシュ（BoneSpace指定時は Apply 側で更にボーンのTMを掛ける）
 	RuntimeState->CachedWindVector = ConvertExternalForceToSimulationSpace(Node, PoseContext, NoisyWindDirection);
@@ -770,11 +829,11 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::Apply(FKawaiiPhysicsModifyBone
 
 	SCOPE_CYCLE_COUNTER(STAT_KawaiiPhysics_ExternalForce_ProceduralWind_Apply);
 
-	// Wave はボーンごとの LengthRateFromRoot に依存するためここで個別に計算し、PreApply でキャッシュした
-	// 他成分と合算する。式は ComputeWindSample の Sample.Wave 計算と一致させること
-	const float Wave = WaveAmplitude * FMath::Sin(TwoPi * RuntimeState->Time / FMath::Max(WavePeriod, 0.01f) -
-		FMath::DegreesToRadians(Bone.LengthRateFromRoot * WaveSpatialOffset) + FMath::DegreesToRadians(WavePhase));
-	const float Total = (RuntimeState->CachedSinesWithoutWave + Wave) * RuntimeState->CachedEnvelope +
+	// Ripple はボーンごとの LengthRateFromRoot に依存するためここで個別に計算し、PreApply でキャッシュした
+	// 他成分と合算する。式は ComputeWindSample の Sample.Ripple 計算と一致させること
+	const float Ripple = RippleForce * FMath::Sin(TwoPi * RuntimeState->Time / FMath::Max(RipplePeriod, 0.01f) -
+		FMath::DegreesToRadians(Bone.LengthRateFromRoot * RippleTipPhaseDelay) + FMath::DegreesToRadians(RipplePhaseOffset));
+	const float Total = (RuntimeState->CachedSinesWithoutRipple + Ripple) * RuntimeState->CachedStrengthCycle +
 		RuntimeState->CachedRandom + RuntimeState->CachedGust;
 
 	float ForceRate = 1.0f;
@@ -783,25 +842,26 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::Apply(FKawaiiPhysicsModifyBone
 		ForceRate = Curve->Eval(Bone.LengthRateFromRoot);
 	}
 
-	// RandomizedForceScale は _Wind と同じく Apply 側でスカラーにだけ掛け、方向キャッシュとの二重掛けを避ける。
+	// 基底の RandomForceScaleRange / RandomizedForceScale は本外力では意図的に無視する
+	// （ランダム性は Seed 管理の Random 系列に一本化。bSupportsRandomForceScaleRange=false により非表示かつ PreApply の乱数化も無効）。
 	// BoneSpace 指定時はキャッシュ済みの風ベクトルに各ボーンのTMを掛けて向きをボーンローカルへ変換する
 	if (ExternalForceSpace == EExternalForceSpace::BoneSpace)
 	{
 		const FVector BoneForce = BoneTM.TransformVector(RuntimeState->CachedWindVector);
-		Bone.Location += BoneForce * Total * ForceRate * RandomizedForceScale * Node.GetStepDeltaTime();
+		Bone.Location += BoneForce * Total * ForceRate * Node.GetStepDeltaTime();
 
 #if ENABLE_ANIM_DEBUG
-		BoneForceMap.Add(Bone.BoneRef.BoneName, BoneForce * Total * ForceRate * RandomizedForceScale);
+		BoneForceMap.Add(Bone.BoneRef.BoneName, BoneForce * Total * ForceRate);
 #endif
 	}
 	else
 	{
-		Bone.Location += RuntimeState->CachedWindVector * Total * ForceRate * RandomizedForceScale *
+		Bone.Location += RuntimeState->CachedWindVector * Total * ForceRate *
 			Node.GetStepDeltaTime();
 
 #if ENABLE_ANIM_DEBUG
 		BoneForceMap.Add(Bone.BoneRef.BoneName,
-		                 RuntimeState->CachedWindVector * Total * ForceRate * RandomizedForceScale);
+		                 RuntimeState->CachedWindVector * Total * ForceRate);
 #endif
 	}
 
@@ -821,11 +881,11 @@ void FKawaiiPhysics_ExternalForce_ProceduralWind::AnimDrawDebugForEditMode(
 		return;
 	}
 
-	// Wave/Total の再計算は Apply と同じ式（ComputeWindSample の Sample.Wave と一致させること）
-	const float Wave = WaveAmplitude * FMath::Sin(TwoPi * RuntimeState->Time / FMath::Max(WavePeriod, 0.01f) -
-		FMath::DegreesToRadians(ModifyBone.LengthRateFromRoot * WaveSpatialOffset) +
-		FMath::DegreesToRadians(WavePhase));
-	const float Total = (RuntimeState->CachedSinesWithoutWave + Wave) * RuntimeState->CachedEnvelope +
+	// Ripple/Total の再計算は Apply と同じ式（ComputeWindSample の Sample.Ripple と一致させること）
+	const float Ripple = RippleForce * FMath::Sin(TwoPi * RuntimeState->Time / FMath::Max(RipplePeriod, 0.01f) -
+		FMath::DegreesToRadians(ModifyBone.LengthRateFromRoot * RippleTipPhaseDelay) +
+		FMath::DegreesToRadians(RipplePhaseOffset));
+	const float Total = (RuntimeState->CachedSinesWithoutRipple + Ripple) * RuntimeState->CachedStrengthCycle +
 		RuntimeState->CachedRandom + RuntimeState->CachedGust;
 
 	float ForceRate = 1.0f;

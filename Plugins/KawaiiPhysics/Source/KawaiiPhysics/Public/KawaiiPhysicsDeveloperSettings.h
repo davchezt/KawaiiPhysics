@@ -51,6 +51,75 @@ public:
 			EditCondition = "bUseFixedSubstepping"))
 	int32 MaxSubsteps = 4;
 
+	/**
+	* シンプルワールドコリジョンの自動収集半径に使う係数。SkeletalMeshComponent の Bounds.SphereRadius に乗算する。
+	* Multiplier used for the Simple World Collision auto gather radius, applied to the SkeletalMeshComponent's Bounds.SphereRadius.
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Auto Gather Radius Scale", ClampMin = "1.0", UIMin = "1.0"))
+	float SimpleWorldCollisionAutoGatherRadiusScale = 1.5f;
+
+	/**
+	* 新規に収集されたコライダーが押し出しを開始するまでのブレンドイン時間（秒）。0でフェードを無効化(即座に全強度)する。
+	* Blend-in time (seconds) before a newly gathered collider starts pushing out at full strength. 0 disables the fade (immediate full strength).
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Fade-In Time", ClampMin = "0", Units = "s"))
+	float SimpleWorldCollisionFadeInTime = 0.2f;
+
+	/**
+	* カメラからの距離がこの値(cm)を超えると収集間隔を間引く。
+	* Beyond this camera distance (cm), the gather interval is throttled (doubled).
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Distance Throttle Start", ClampMin = "0", Units = "cm"))
+	float SimpleWorldCollisionDistanceThrottleStart = 3000.f;
+
+	/**
+	* カメラからの距離がこの値(cm)を超えると収集自体を停止する。
+	* Beyond this camera distance (cm), gathering is stopped entirely.
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Distance Throttle Stop", ClampMin = "0", Units = "cm"))
+	float SimpleWorldCollisionDistanceThrottleStop = 10000.f;
+
+	/**
+	* シンプルワールドコリジョンが収集グループ（Entry）あたりに保持する最大収集コンポーネント数。Shared Publisher で共有する場合はファミリー全体で 1 グループとして数える。
+	* a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxComponents CVar が 0 以上の場合はそちらが優先される。
+	* Maximum number of gathered components Simple World Collision keeps per gather group (Entry). When shared by a Shared Publisher, the whole family counts as one group.
+	* Overridden by the a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxComponents CVar when it is >= 0.
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Max Gathered Components", ClampMin = "1", UIMin = "1"))
+	int32 SimpleWorldCollisionMaxGatheredComponents = 64;
+
+	/**
+	* PhysicsAsset モードで SkeletalMeshComponent 1つから採用する最大 body 数。bone index 昇順でこの数まで採用される。
+	* a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxPhysicsAssetBodies CVar が 0 以上の場合はそちらが優先される。
+	* Maximum number of bodies gathered from one SkeletalMeshComponent in PhysicsAsset mode. Bodies are taken in bone-index order up to this count.
+	* Overridden by the a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxPhysicsAssetBodies CVar when it is >= 0.
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Max PhysicsAsset Bodies", ClampMin = "1", UIMin = "1"))
+	int32 SimpleWorldCollisionMaxPhysicsAssetBodies = 32;
+
+	/**
+	* Simple World Collision の Convex Hull 1つから採用する最大平面数。超過した Hull は Bounding Box へフォールバックする。
+	* Maximum number of planes accepted from one Simple World Collision convex hull. Hulls over this limit fall back to Bounding Box.
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Max Convex Planes", ClampMin = "4", UIMin = "4"))
+	int32 SimpleWorldCollisionMaxConvexPlanes = 64;
+
+	/**
+	* 収集済みコンポーネントのスケールが変化したら次 Tick で再収集する（既定 OFF。ISM はインスタンススケール、PhysicsAsset モードは bone-local に焼き込んだスケールを対象）。
+	* Re-gather a gathered component on the next tick when its scale changes (default OFF; instance scale for ISM,
+	* the baked bone-local scale for PhysicsAsset mode).
+	*/
+	UPROPERTY(EditAnywhere, config, Category = "Simple World Collision",
+		meta = (DisplayName = "Regather On Scale Change"))
+	bool bSimpleWorldCollisionRegatherOnScaleChange = false;
+
 #if WITH_EDITORONLY_DATA
 	/**
 	* MCPコメント枠のタイトルに付与するプレフィックス。

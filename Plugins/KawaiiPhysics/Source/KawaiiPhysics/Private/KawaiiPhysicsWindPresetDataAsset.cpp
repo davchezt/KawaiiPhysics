@@ -14,30 +14,28 @@ FKawaiiProceduralWindDynamicParams FKawaiiProceduralWindPreset::ToDynamicParams(
 {
 	FKawaiiProceduralWindDynamicParams Params;
 
-	Params.bOverrideSteadyForce = true;
-	Params.SteadyForce = SteadyForce;
-	Params.bOverrideOscillationForce = true;
-	Params.OscillationForce = OscillationForce;
-	Params.bOverrideOscillationPeriod = true;
-	Params.OscillationPeriod = OscillationPeriod;
-	Params.bOverrideWaveAmplitude = true;
-	Params.WaveAmplitude = WaveAmplitude;
-	Params.bOverrideWavePeriod = true;
-	Params.WavePeriod = WavePeriod;
-	Params.bOverrideWaveSpatialOffset = true;
-	Params.WaveSpatialOffset = WaveSpatialOffset;
-	Params.bOverrideEnvelopeMin = true;
-	Params.EnvelopeMin = EnvelopeMin;
-	Params.bOverrideEnvelopeMax = true;
-	Params.EnvelopeMax = EnvelopeMax;
-	Params.bOverrideEnvelopeFrequency = true;
-	Params.EnvelopeFrequency = EnvelopeFrequency;
+	Params.bOverrideConstantForce = true;
+	Params.ConstantForce = ConstantForce;
+	Params.bOverrideSwayForce = true;
+	Params.SwayForce = SwayForce;
+	Params.bOverrideSwayPeriod = true;
+	Params.SwayPeriod = SwayPeriod;
+	Params.bOverrideRippleForce = true;
+	Params.RippleForce = RippleForce;
+	Params.bOverrideRipplePeriod = true;
+	Params.RipplePeriod = RipplePeriod;
+	Params.bOverrideRippleTipPhaseDelay = true;
+	Params.RippleTipPhaseDelay = RippleTipPhaseDelay;
+	Params.bOverrideStrengthCycleRange = true;
+	Params.StrengthCycleRange = StrengthCycleRange;
+	Params.bOverrideStrengthCyclePeriod = true;
+	Params.StrengthCyclePeriod = StrengthCyclePeriod;
 	Params.bOverrideRandomForce = true;
 	Params.RandomForce = RandomForce;
-	Params.bOverrideRandomPeriod = true;
-	Params.RandomPeriod = RandomPeriod;
-	Params.bOverrideDirectionNoiseAngle = true;
-	Params.DirectionNoiseAngle = DirectionNoiseAngle;
+	Params.bOverrideRandomForcePeriod = true;
+	Params.RandomForcePeriod = RandomForcePeriod;
+	Params.bOverrideWindDirectionNoiseAngle = true;
+	Params.WindDirectionNoiseAngle = WindDirectionNoiseAngle;
 
 	return Params;
 }
@@ -103,34 +101,32 @@ namespace
 	FKawaiiProceduralWindPreset MakeWindPreset(
 		const FGameplayTag& PresetTag,
 		const FText& PresetName,
-		float SteadyForce,
-		float OscillationForce,
-		float OscillationPeriod,
-		float WaveAmplitude,
-		float WavePeriod,
-		float WaveSpatialOffset,
-		float EnvelopeMin,
-		float EnvelopeMax,
-		float EnvelopeFrequency,
+		float ConstantForce,
+		float SwayForce,
+		float SwayPeriod,
+		float RippleForce,
+		float RipplePeriod,
+		float RippleTipPhaseDelay,
+		const FFloatInterval& StrengthCycleRange,
+		float StrengthCyclePeriod,
 		float RandomForce,
-		float RandomPeriod,
-		float DirectionNoiseAngle)
+		float RandomForcePeriod,
+		float WindDirectionNoiseAngle)
 	{
 		FKawaiiProceduralWindPreset Preset;
 		Preset.PresetTag = PresetTag;
 		Preset.PresetName = PresetName;
-		Preset.SteadyForce = SteadyForce;
-		Preset.OscillationForce = OscillationForce;
-		Preset.OscillationPeriod = OscillationPeriod;
-		Preset.WaveAmplitude = WaveAmplitude;
-		Preset.WavePeriod = WavePeriod;
-		Preset.WaveSpatialOffset = WaveSpatialOffset;
-		Preset.EnvelopeMin = EnvelopeMin;
-		Preset.EnvelopeMax = EnvelopeMax;
-		Preset.EnvelopeFrequency = EnvelopeFrequency;
+		Preset.ConstantForce = ConstantForce;
+		Preset.SwayForce = SwayForce;
+		Preset.SwayPeriod = SwayPeriod;
+		Preset.RippleForce = RippleForce;
+		Preset.RipplePeriod = RipplePeriod;
+		Preset.RippleTipPhaseDelay = RippleTipPhaseDelay;
+		Preset.StrengthCycleRange = StrengthCycleRange;
+		Preset.StrengthCyclePeriod = StrengthCyclePeriod;
 		Preset.RandomForce = RandomForce;
-		Preset.RandomPeriod = RandomPeriod;
-		Preset.DirectionNoiseAngle = DirectionNoiseAngle;
+		Preset.RandomForcePeriod = RandomForcePeriod;
+		Preset.WindDirectionNoiseAngle = WindDirectionNoiseAngle;
 		return Preset;
 	}
 
@@ -197,48 +193,45 @@ TArray<FKawaiiProceduralWindPreset> UKawaiiPhysicsWindPresetDataAsset::GetDefaul
 
 	DefaultPresets.Add(MakeWindPreset(
 		TAG_KawaiiPhysics_WindPreset_Breeze,
-		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "BreezePresetName", "Breeze / そよ風"),
+		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "BreezePresetName", "Breeze"),
 		2.0f,
 		1.0f,
-		2.0f,
+		3.0f,
 		1.0f,
-		1.5f,
-		90.0f,
-		0.6f,
-		1.0f,
-		0.05f,
+		1.2f,
+		120.0f,
+		FFloatInterval(0.6f, 1.0f),
+		20.0f,
 		0.5f,
 		0.8f,
 		5.0f));
 
 	DefaultPresets.Add(MakeWindPreset(
 		TAG_KawaiiPhysics_WindPreset_Strong,
-		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "StrongPresetName", "Strong / 強風"),
+		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "StrongPresetName", "Strong"),
 		8.0f,
 		4.0f,
-		0.8f,
+		1.6f,
 		3.0f,
-		0.6f,
+		0.5f,
 		120.0f,
-		0.7f,
-		1.3f,
-		0.08f,
+		FFloatInterval(0.7f, 1.3f),
+		12.0f,
 		2.0f,
 		0.5f,
 		10.0f));
 
 	DefaultPresets.Add(MakeWindPreset(
 		TAG_KawaiiPhysics_WindPreset_Storm,
-		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "StormPresetName", "Storm / 嵐"),
+		NSLOCTEXT("KawaiiPhysicsWindPresetDataAsset", "StormPresetName", "Storm"),
 		15.0f,
 		10.0f,
-		0.4f,
+		0.9f,
 		8.0f,
-		0.35f,
+		0.3f,
 		180.0f,
-		0.5f,
-		1.6f,
-		0.15f,
+		FFloatInterval(0.5f, 1.6f),
+		7.0f,
 		6.0f,
 		0.3f,
 		20.0f));

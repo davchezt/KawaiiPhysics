@@ -17,7 +17,7 @@ UCLASS()
 class UAnimGraphNode_KawaiiPhysics : public UAnimGraphNode_SkeletalControlBase
 {
 	GENERATED_UCLASS_BODY()
-	UPROPERTY(EditAnywhere, Category = Settings)
+	UPROPERTY(EditAnywhere, Category = "Settings")
 	FAnimNode_KawaiiPhysics Node;
 
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
@@ -63,7 +63,7 @@ private:
 	void CreateExportDataAssetPath(FString& PackageName, const FString& DefaultSuffix) const;
 
 	/** Creates the data asset package. */
-	UPackage* CreateDataAssetPackage(const FString& DialogTitle, const FString& DefaultSuffix,
+	UPackage* CreateDataAssetPackage(const FText& DialogTitle, const FString& DefaultSuffix,
 	                                 FString& AssetName) const;
 
 	/** Shows the export asset notification. */
@@ -84,8 +84,8 @@ private:
 	/** このノードと対象プリセットとの差分を確認します / Checks the diff between this node and its target preset. */
 	void CheckPresetDiff();
 
-	/** Procedural Windの波形プレビューウィンドウを開きます / Opens the waveform preview window for Procedural Wind. */
-	void OpenWindScopeWindow();
+	/** 指定したProcedural Windの波形プレビューウィンドウを開きます / Opens the waveform preview window for the specified Procedural Wind. */
+	void OpenWindScopeWindow(int32 ExternalForceIndex = INDEX_NONE);
 
 public:
 	/** Enables or disables debug drawing for bones. */
@@ -122,7 +122,7 @@ public:
 
 	/** Enables or disables debug drawing for planar limits. */
 	UPROPERTY()
-	bool bEnableDebugDrawPlanerLimit = true;
+	bool bEnableDebugDrawPlanarLimit = true;
 
 	/** Enables or disables debug drawing for bone constraints. */
 	UPROPERTY()

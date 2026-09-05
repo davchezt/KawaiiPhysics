@@ -28,6 +28,7 @@ public class KawaiiPhysicsEd : ModuleRules
 			"Slate",
 			"SlateCore",
 			"DeveloperSettings",
+			"Settings",
 			"PropertyEditor",
 			"ContentBrowser",
 			"SourceControl",
@@ -39,7 +40,10 @@ public class KawaiiPhysicsEd : ModuleRules
 			"JsonUtilities",
 			"DesktopPlatform",
 			"Projects",
-			"WorkspaceMenuStructure"
+			"Sequencer",
+			"SequencerCore",
+			"MovieScene",
+			"KawaiiPhysicsSequencer"
 		});
 
 		if (Target.Version.MajorVersion > 5 || (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 5))

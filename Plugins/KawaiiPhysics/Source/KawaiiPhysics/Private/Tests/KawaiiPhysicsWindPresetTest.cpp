@@ -28,67 +28,53 @@ struct FWindPresetParamMapping
 
 const FWindPresetParamMapping GWindPresetParamMappings[] = {
 	{
-		TEXT("SteadyForce"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideSteadyForce,
-		&FKawaiiProceduralWindDynamicParams::SteadyForce,
-		&FKawaiiProceduralWindPreset::SteadyForce,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::SteadyForce
+		TEXT("ConstantForce"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideConstantForce,
+		&FKawaiiProceduralWindDynamicParams::ConstantForce,
+		&FKawaiiProceduralWindPreset::ConstantForce,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::ConstantForce
 	},
 	{
-		TEXT("OscillationForce"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideOscillationForce,
-		&FKawaiiProceduralWindDynamicParams::OscillationForce,
-		&FKawaiiProceduralWindPreset::OscillationForce,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::OscillationForce
+		TEXT("SwayForce"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideSwayForce,
+		&FKawaiiProceduralWindDynamicParams::SwayForce,
+		&FKawaiiProceduralWindPreset::SwayForce,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::SwayForce
 	},
 	{
-		TEXT("OscillationPeriod"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideOscillationPeriod,
-		&FKawaiiProceduralWindDynamicParams::OscillationPeriod,
-		&FKawaiiProceduralWindPreset::OscillationPeriod,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::OscillationPeriod
+		TEXT("SwayPeriod"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideSwayPeriod,
+		&FKawaiiProceduralWindDynamicParams::SwayPeriod,
+		&FKawaiiProceduralWindPreset::SwayPeriod,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::SwayPeriod
 	},
 	{
-		TEXT("WaveAmplitude"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideWaveAmplitude,
-		&FKawaiiProceduralWindDynamicParams::WaveAmplitude,
-		&FKawaiiProceduralWindPreset::WaveAmplitude,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::WaveAmplitude
+		TEXT("RippleForce"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideRippleForce,
+		&FKawaiiProceduralWindDynamicParams::RippleForce,
+		&FKawaiiProceduralWindPreset::RippleForce,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::RippleForce
 	},
 	{
-		TEXT("WavePeriod"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideWavePeriod,
-		&FKawaiiProceduralWindDynamicParams::WavePeriod,
-		&FKawaiiProceduralWindPreset::WavePeriod,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::WavePeriod
+		TEXT("RipplePeriod"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideRipplePeriod,
+		&FKawaiiProceduralWindDynamicParams::RipplePeriod,
+		&FKawaiiProceduralWindPreset::RipplePeriod,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::RipplePeriod
 	},
 	{
-		TEXT("WaveSpatialOffset"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideWaveSpatialOffset,
-		&FKawaiiProceduralWindDynamicParams::WaveSpatialOffset,
-		&FKawaiiProceduralWindPreset::WaveSpatialOffset,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::WaveSpatialOffset
+		TEXT("RippleTipPhaseDelay"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideRippleTipPhaseDelay,
+		&FKawaiiProceduralWindDynamicParams::RippleTipPhaseDelay,
+		&FKawaiiProceduralWindPreset::RippleTipPhaseDelay,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::RippleTipPhaseDelay
 	},
 	{
-		TEXT("EnvelopeMin"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideEnvelopeMin,
-		&FKawaiiProceduralWindDynamicParams::EnvelopeMin,
-		&FKawaiiProceduralWindPreset::EnvelopeMin,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::EnvelopeMin
-	},
-	{
-		TEXT("EnvelopeMax"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideEnvelopeMax,
-		&FKawaiiProceduralWindDynamicParams::EnvelopeMax,
-		&FKawaiiProceduralWindPreset::EnvelopeMax,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::EnvelopeMax
-	},
-	{
-		TEXT("EnvelopeFrequency"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideEnvelopeFrequency,
-		&FKawaiiProceduralWindDynamicParams::EnvelopeFrequency,
-		&FKawaiiProceduralWindPreset::EnvelopeFrequency,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::EnvelopeFrequency
+		TEXT("StrengthCyclePeriod"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideStrengthCyclePeriod,
+		&FKawaiiProceduralWindDynamicParams::StrengthCyclePeriod,
+		&FKawaiiProceduralWindPreset::StrengthCyclePeriod,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::StrengthCyclePeriod
 	},
 	{
 		TEXT("RandomForce"),
@@ -98,57 +84,64 @@ const FWindPresetParamMapping GWindPresetParamMappings[] = {
 		&FKawaiiPhysics_ExternalForce_ProceduralWind::RandomForce
 	},
 	{
-		TEXT("RandomPeriod"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideRandomPeriod,
-		&FKawaiiProceduralWindDynamicParams::RandomPeriod,
-		&FKawaiiProceduralWindPreset::RandomPeriod,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::RandomPeriod
+		TEXT("RandomForcePeriod"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideRandomForcePeriod,
+		&FKawaiiProceduralWindDynamicParams::RandomForcePeriod,
+		&FKawaiiProceduralWindPreset::RandomForcePeriod,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::RandomForcePeriod
 	},
 	{
-		TEXT("DirectionNoiseAngle"),
-		&FKawaiiProceduralWindDynamicParams::bOverrideDirectionNoiseAngle,
-		&FKawaiiProceduralWindDynamicParams::DirectionNoiseAngle,
-		&FKawaiiProceduralWindPreset::DirectionNoiseAngle,
-		&FKawaiiPhysics_ExternalForce_ProceduralWind::DirectionNoiseAngle
+		TEXT("WindDirectionNoiseAngle"),
+		&FKawaiiProceduralWindDynamicParams::bOverrideWindDirectionNoiseAngle,
+		&FKawaiiProceduralWindDynamicParams::WindDirectionNoiseAngle,
+		&FKawaiiProceduralWindPreset::WindDirectionNoiseAngle,
+		&FKawaiiPhysics_ExternalForce_ProceduralWind::WindDirectionNoiseAngle
 	}
 };
 
-bool TestFloatNear(FAutomationTestBase& Test, const FString& Name, const float Actual, const float Expected,
+bool TestWindPresetFloatNear(FAutomationTestBase& Test, const FString& Name, const float Actual, const float Expected,
                    const float Tol = GWindPresetTol)
 {
 	return Test.TestTrue(FString::Printf(TEXT("%s: got %.9f expected %.9f"), *Name, Actual, Expected),
 	                     FMath::IsNearlyEqual(Actual, Expected, Tol));
 }
 
+bool TestIntervalNear(FAutomationTestBase& Test, const FString& Name, const FFloatInterval& Actual, const FFloatInterval& Expected)
+{
+	bool bOk = true;
+	bOk &= TestWindPresetFloatNear(Test, FString::Printf(TEXT("%s Min"), *Name), Actual.Min, Expected.Min);
+	bOk &= TestWindPresetFloatNear(Test, FString::Printf(TEXT("%s Max"), *Name), Actual.Max, Expected.Max);
+	return bOk;
+}
+
 FKawaiiProceduralWindPreset MakeExpectedPreset(
 	const FGameplayTag& PresetTag,
-	const float SteadyForce,
-	const float OscillationForce,
-	const float OscillationPeriod,
-	const float WaveAmplitude,
-	const float WavePeriod,
-	const float WaveSpatialOffset,
-	const float EnvelopeMin,
-	const float EnvelopeMax,
-	const float EnvelopeFrequency,
+	const float ConstantForce,
+	const float SwayForce,
+	const float SwayPeriod,
+	const float RippleForce,
+	const float RipplePeriod,
+	const float RippleTipPhaseDelay,
+	const float StrengthCycleRangeMin,
+	const float StrengthCycleRangeMax,
+	const float StrengthCyclePeriod,
 	const float RandomForce,
-	const float RandomPeriod,
-	const float DirectionNoiseAngle)
+	const float RandomForcePeriod,
+	const float WindDirectionNoiseAngle)
 {
 	FKawaiiProceduralWindPreset Preset;
 	Preset.PresetTag = PresetTag;
-	Preset.SteadyForce = SteadyForce;
-	Preset.OscillationForce = OscillationForce;
-	Preset.OscillationPeriod = OscillationPeriod;
-	Preset.WaveAmplitude = WaveAmplitude;
-	Preset.WavePeriod = WavePeriod;
-	Preset.WaveSpatialOffset = WaveSpatialOffset;
-	Preset.EnvelopeMin = EnvelopeMin;
-	Preset.EnvelopeMax = EnvelopeMax;
-	Preset.EnvelopeFrequency = EnvelopeFrequency;
+	Preset.ConstantForce = ConstantForce;
+	Preset.SwayForce = SwayForce;
+	Preset.SwayPeriod = SwayPeriod;
+	Preset.RippleForce = RippleForce;
+	Preset.RipplePeriod = RipplePeriod;
+	Preset.RippleTipPhaseDelay = RippleTipPhaseDelay;
+	Preset.StrengthCycleRange = FFloatInterval(StrengthCycleRangeMin, StrengthCycleRangeMax);
+	Preset.StrengthCyclePeriod = StrengthCyclePeriod;
 	Preset.RandomForce = RandomForce;
-	Preset.RandomPeriod = RandomPeriod;
-	Preset.DirectionNoiseAngle = DirectionNoiseAngle;
+	Preset.RandomForcePeriod = RandomForcePeriod;
+	Preset.WindDirectionNoiseAngle = WindDirectionNoiseAngle;
 	return Preset;
 }
 
@@ -161,11 +154,17 @@ bool TestDynamicParamsMatchPreset(FAutomationTestBase& Test, const FString& Pref
 	{
 		bOk &= Test.TestTrue(FString::Printf(TEXT("%s %s override"), *Prefix, Mapping.Name),
 		                     Params.*(Mapping.DynamicOverride));
-		bOk &= TestFloatNear(Test,
+		bOk &= TestWindPresetFloatNear(Test,
 		                      FString::Printf(TEXT("%s %s value"), *Prefix, Mapping.Name),
 		                      Params.*(Mapping.DynamicValue),
 		                      Preset.*(Mapping.PresetValue));
 	}
+	bOk &= Test.TestTrue(FString::Printf(TEXT("%s StrengthCycleRange override"), *Prefix),
+	                     Params.bOverrideStrengthCycleRange);
+	bOk &= TestIntervalNear(Test,
+	                        FString::Printf(TEXT("%s StrengthCycleRange value"), *Prefix),
+	                        Params.StrengthCycleRange,
+	                        Preset.StrengthCycleRange);
 	return bOk;
 }
 
@@ -178,11 +177,15 @@ bool TestPresetValues(FAutomationTestBase& Test, const FString& Prefix,
 	                     Actual.PresetTag.MatchesTagExact(Expected.PresetTag));
 	for (const FWindPresetParamMapping& Mapping : GWindPresetParamMappings)
 	{
-		bOk &= TestFloatNear(Test,
+		bOk &= TestWindPresetFloatNear(Test,
 		                      FString::Printf(TEXT("%s %s"), *Prefix, Mapping.Name),
 		                      Actual.*(Mapping.PresetValue),
 		                      Expected.*(Mapping.PresetValue));
 	}
+	bOk &= TestIntervalNear(Test,
+	                        FString::Printf(TEXT("%s StrengthCycleRange"), *Prefix),
+	                        Actual.StrengthCycleRange,
+	                        Expected.StrengthCycleRange);
 	return bOk;
 }
 
@@ -193,11 +196,15 @@ bool TestWindValuesMatchPreset(FAutomationTestBase& Test, const FString& Prefix,
 	bool bOk = true;
 	for (const FWindPresetParamMapping& Mapping : GWindPresetParamMappings)
 	{
-		bOk &= TestFloatNear(Test,
+		bOk &= TestWindPresetFloatNear(Test,
 		                      FString::Printf(TEXT("%s %s"), *Prefix, Mapping.Name),
 		                      Wind.*(Mapping.WindValue),
 		                      Preset.*(Mapping.PresetValue));
 	}
+	bOk &= TestIntervalNear(Test,
+	                        FString::Printf(TEXT("%s StrengthCycleRange"), *Prefix),
+	                        Wind.StrengthCycleRange,
+	                        Preset.StrengthCycleRange);
 	return bOk;
 }
 }
@@ -209,27 +216,26 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FKawaiiPhysicsWindPresetToDynamicParamsTest,
 bool FKawaiiPhysicsWindPresetToDynamicParamsTest::RunTest(const FString& Parameters)
 {
 	FKawaiiProceduralWindPreset Preset;
-	Preset.SteadyForce = 3.25f;
-	Preset.OscillationForce = 2.5f;
-	Preset.OscillationPeriod = 1.75f;
-	Preset.WaveAmplitude = 4.5f;
-	Preset.WavePeriod = 0.65f;
-	Preset.WaveSpatialOffset = 135.0f;
-	Preset.EnvelopeMin = 0.35f;
-	Preset.EnvelopeMax = 1.45f;
-	Preset.EnvelopeFrequency = 0.12f;
+	Preset.ConstantForce = 3.25f;
+	Preset.SwayForce = 2.5f;
+	Preset.SwayPeriod = 1.75f;
+	Preset.RippleForce = 4.5f;
+	Preset.RipplePeriod = 0.65f;
+	Preset.RippleTipPhaseDelay = 135.0f;
+	Preset.StrengthCycleRange = FFloatInterval(0.35f, 1.45f);
+	Preset.StrengthCyclePeriod = 8.33f;
 	Preset.RandomForce = 1.25f;
-	Preset.RandomPeriod = 0.42f;
-	Preset.DirectionNoiseAngle = 12.5f;
+	Preset.RandomForcePeriod = 0.42f;
+	Preset.WindDirectionNoiseAngle = 12.5f;
 
 	const FKawaiiProceduralWindDynamicParams Params = Preset.ToDynamicParams();
 
 	bool bOk = true;
 	bOk &= TestDynamicParamsMatchPreset(*this, TEXT("ToDynamicParams"), Params, Preset);
 	bOk &= TestFalse(TEXT("WindDirection override remains false"), Params.bOverrideWindDirection);
-	bOk &= TestFalse(TEXT("WavePhase override remains false"), Params.bOverrideWavePhase);
-	bOk &= TestFalse(TEXT("EnvelopePhase override remains false"), Params.bOverrideEnvelopePhase);
-	bOk &= TestFalse(TEXT("DirectionNoisePeriod override remains false"), Params.bOverrideDirectionNoisePeriod);
+	bOk &= TestFalse(TEXT("RipplePhaseOffset override remains false"), Params.bOverrideRipplePhaseOffset);
+	bOk &= TestFalse(TEXT("StrengthCyclePhaseOffset override remains false"), Params.bOverrideStrengthCyclePhaseOffset);
+	bOk &= TestFalse(TEXT("WindDirectionNoisePeriod override remains false"), Params.bOverrideWindDirectionNoisePeriod);
 	bOk &= TestFalse(TEXT("TimeScale override remains false"), Params.bOverrideTimeScale);
 	bOk &= TestFalse(TEXT("IsEnabled override remains false"), Params.bOverrideIsEnabled);
 	return bOk;
@@ -252,13 +258,13 @@ bool FKawaiiPhysicsWindPresetDefaultsTest::RunTest(const FString& Parameters)
 
 	const FKawaiiProceduralWindPreset ExpectedBreeze = MakeExpectedPreset(
 		TAG_KawaiiPhysics_WindPreset_Breeze,
-		2.0f, 1.0f, 2.0f, 1.0f, 1.5f, 90.0f, 0.6f, 1.0f, 0.05f, 0.5f, 0.8f, 5.0f);
+		2.0f, 1.0f, 3.0f, 1.0f, 1.2f, 120.0f, 0.6f, 1.0f, 20.0f, 0.5f, 0.8f, 5.0f);
 	const FKawaiiProceduralWindPreset ExpectedStrong = MakeExpectedPreset(
 		TAG_KawaiiPhysics_WindPreset_Strong,
-		8.0f, 4.0f, 0.8f, 3.0f, 0.6f, 120.0f, 0.7f, 1.3f, 0.08f, 2.0f, 0.5f, 10.0f);
+		8.0f, 4.0f, 1.6f, 3.0f, 0.5f, 120.0f, 0.7f, 1.3f, 12.0f, 2.0f, 0.5f, 10.0f);
 	const FKawaiiProceduralWindPreset ExpectedStorm = MakeExpectedPreset(
 		TAG_KawaiiPhysics_WindPreset_Storm,
-		15.0f, 10.0f, 0.4f, 8.0f, 0.35f, 180.0f, 0.5f, 1.6f, 0.15f, 6.0f, 0.3f, 20.0f);
+		15.0f, 10.0f, 0.9f, 8.0f, 0.3f, 180.0f, 0.5f, 1.6f, 7.0f, 6.0f, 0.3f, 20.0f);
 
 	bOk &= TestPresetValues(*this, TEXT("Breeze"), Defaults[0], ExpectedBreeze);
 	bOk &= TestPresetValues(*this, TEXT("Strong"), Defaults[1], ExpectedStrong);
@@ -283,20 +289,20 @@ bool FKawaiiPhysicsWindPresetApplyRoundTripTest::RunTest(const FString& Paramete
 	FKawaiiPhysics_ExternalForce_ProceduralWind Wind;
 	const float BeforeTimeScale = Wind.TimeScale;
 	const FVector BeforeWindDirection = Wind.WindDirection;
-	const float BeforeWavePhase = Wind.WavePhase;
-	const float BeforeEnvelopePhase = Wind.EnvelopePhase;
-	const float BeforeDirectionNoisePeriod = Wind.DirectionNoisePeriod;
+	const float BeforeRipplePhaseOffset = Wind.RipplePhaseOffset;
+	const float BeforeStrengthCyclePhaseOffset = Wind.StrengthCyclePhaseOffset;
+	const float BeforeWindDirectionNoisePeriod = Wind.WindDirectionNoisePeriod;
 
 	Wind.ApplyDynamicParams(Preset.ToDynamicParams());
 
 	bOk &= TestWindValuesMatchPreset(*this, TEXT("Strong applied"), Wind, Preset);
-	bOk &= TestFloatNear(*this, TEXT("TimeScale unchanged"), Wind.TimeScale, BeforeTimeScale);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("TimeScale unchanged"), Wind.TimeScale, BeforeTimeScale);
 	bOk &= TestTrue(TEXT("WindDirection unchanged"), Wind.WindDirection.Equals(BeforeWindDirection));
-	bOk &= TestFloatNear(*this, TEXT("WavePhase unchanged"), Wind.WavePhase, BeforeWavePhase);
-	bOk &= TestFloatNear(*this, TEXT("EnvelopePhase unchanged"), Wind.EnvelopePhase, BeforeEnvelopePhase);
-	bOk &= TestFloatNear(*this, TEXT("DirectionNoisePeriod unchanged"),
-	                     Wind.DirectionNoisePeriod,
-	                     BeforeDirectionNoisePeriod);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("RipplePhaseOffset unchanged"), Wind.RipplePhaseOffset, BeforeRipplePhaseOffset);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("StrengthCyclePhaseOffset unchanged"), Wind.StrengthCyclePhaseOffset, BeforeStrengthCyclePhaseOffset);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("WindDirectionNoisePeriod unchanged"),
+	                     Wind.WindDirectionNoisePeriod,
+	                     BeforeWindDirectionNoisePeriod);
 	return bOk;
 }
 
@@ -359,12 +365,12 @@ bool FKawaiiPhysicsWindPresetRequestDynamicParamsStateTest::RunTest(const FStrin
 
 	bOk &= TestWindValuesMatchPreset(*this, TEXT("Requested preset applied"), Wind, Preset);
 	bOk &= TestTrue(TEXT("bIsEnabled applied"), Wind.bIsEnabled);
-	bOk &= TestFloatNear(*this, TEXT("TimeScale applied"), Wind.TimeScale, 1.0f);
-	bOk &= TestFloatNear(*this, TEXT("Time preserved"), Wind.RuntimeState->Time, 5.0f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust StartTime preserved"), Wind.RuntimeState->ActiveGust.StartTime, 4.5f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust Strength preserved"), Wind.RuntimeState->ActiveGust.Strength, 7.0f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust RiseTime preserved"), Wind.RuntimeState->ActiveGust.RiseTime, 0.2f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust DecayTime preserved"), Wind.RuntimeState->ActiveGust.DecayTime, 0.7f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("TimeScale applied"), Wind.TimeScale, 1.0f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("Time preserved"), Wind.RuntimeState->Time, 5.0f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust StartTime preserved"), Wind.RuntimeState->ActiveGust.StartTime, 4.5f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust Strength preserved"), Wind.RuntimeState->ActiveGust.Strength, 7.0f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust RiseTime preserved"), Wind.RuntimeState->ActiveGust.RiseTime, 0.2f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust DecayTime preserved"), Wind.RuntimeState->ActiveGust.DecayTime, 0.7f);
 	bOk &= TestTrue(TEXT("ActiveGust active preserved"), Wind.RuntimeState->ActiveGust.bIsActive);
 	bOk &= TestFalse(TEXT("PendingParams reset"), Wind.RuntimeState->PendingParams.IsSet());
 
@@ -379,7 +385,7 @@ bool FKawaiiPhysicsWindPresetRequestDynamicParamsStateTest::RunTest(const FStrin
 	LazyWind.ConsumePendingRequests();
 	bOk &= TestWindValuesMatchPreset(*this, TEXT("Lazy requested preset applied"), LazyWind, Preset);
 	bOk &= TestTrue(TEXT("Lazy bIsEnabled applied"), LazyWind.bIsEnabled);
-	bOk &= TestFloatNear(*this, TEXT("Lazy TimeScale applied"), LazyWind.TimeScale, 1.0f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("Lazy TimeScale applied"), LazyWind.TimeScale, 1.0f);
 	bOk &= TestFalse(TEXT("Lazy PendingParams reset"), LazyWind.RuntimeState->PendingParams.IsSet());
 	return bOk;
 }
@@ -400,11 +406,11 @@ bool FKawaiiPhysicsWindPresetRequestGustTest::RunTest(const FString& Parameters)
 	bOk &= TestTrue(TEXT("PendingGust queued"), Wind.RuntimeState->PendingGust.IsSet());
 	bOk &= TestFalse(TEXT("PendingParams unchanged before consume"), Wind.RuntimeState->PendingParams.IsSet());
 	Wind.ConsumePendingRequests();
-	bOk &= TestFloatNear(*this, TEXT("Time unchanged"), Wind.RuntimeState->Time, 3.25f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust StartTime"), Wind.RuntimeState->ActiveGust.StartTime, 3.25f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust Strength"), Wind.RuntimeState->ActiveGust.Strength, 6.0f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust RiseTime"), Wind.RuntimeState->ActiveGust.RiseTime, 0.1f);
-	bOk &= TestFloatNear(*this, TEXT("ActiveGust DecayTime"), Wind.RuntimeState->ActiveGust.DecayTime, 0.5f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("Time unchanged"), Wind.RuntimeState->Time, 3.25f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust StartTime"), Wind.RuntimeState->ActiveGust.StartTime, 3.25f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust Strength"), Wind.RuntimeState->ActiveGust.Strength, 6.0f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust RiseTime"), Wind.RuntimeState->ActiveGust.RiseTime, 0.1f);
+	bOk &= TestWindPresetFloatNear(*this, TEXT("ActiveGust DecayTime"), Wind.RuntimeState->ActiveGust.DecayTime, 0.5f);
 	bOk &= TestTrue(TEXT("ActiveGust active"), Wind.RuntimeState->ActiveGust.bIsActive);
 	bOk &= TestFalse(TEXT("PendingGust reset"), Wind.RuntimeState->PendingGust.IsSet());
 	bOk &= TestFalse(TEXT("PendingParams unchanged after consume"), Wind.RuntimeState->PendingParams.IsSet());
@@ -434,7 +440,7 @@ bool FKawaiiPhysicsWindPresetFindPresetByTagTest::RunTest(const FString& Paramet
 	{
 		bOk &= TestTrue(TEXT("Strong preset tag matches"),
 		                StrongPreset->PresetTag.MatchesTagExact(TAG_KawaiiPhysics_WindPreset_Strong));
-		bOk &= TestFloatNear(*this, TEXT("Strong preset value"), StrongPreset->SteadyForce, 8.0f);
+		bOk &= TestWindPresetFloatNear(*this, TEXT("Strong preset value"), StrongPreset->ConstantForce, 8.0f);
 	}
 
 	bOk &= TestTrue(TEXT("Empty tag returns null"), DataAsset->FindPresetByTag(FGameplayTag()) == nullptr);
@@ -442,7 +448,7 @@ bool FKawaiiPhysicsWindPresetFindPresetByTagTest::RunTest(const FString& Paramet
 	                DataAsset->FindPresetByTag(TAG_KawaiiPhysics_WindPreset_TestUnregistered) == nullptr);
 
 	FKawaiiProceduralWindPreset DuplicateStrong = DataAsset->Presets[1];
-	DuplicateStrong.SteadyForce = 123.0f;
+	DuplicateStrong.ConstantForce = 123.0f;
 	DataAsset->Presets.Add(DuplicateStrong);
 
 	const FKawaiiProceduralWindPreset* FirstStrongPreset =
@@ -450,7 +456,7 @@ bool FKawaiiPhysicsWindPresetFindPresetByTagTest::RunTest(const FString& Paramet
 	bOk &= TestTrue(TEXT("Duplicate tag returns first preset"), FirstStrongPreset == &DataAsset->Presets[1]);
 	if (FirstStrongPreset)
 	{
-		bOk &= TestFloatNear(*this, TEXT("Duplicate tag keeps first value"), FirstStrongPreset->SteadyForce, 8.0f);
+		bOk &= TestWindPresetFloatNear(*this, TEXT("Duplicate tag keeps first value"), FirstStrongPreset->ConstantForce, 8.0f);
 	}
 
 	return bOk;
@@ -555,7 +561,7 @@ bool FKawaiiPhysicsWindPresetResolveFallbackConfiguredAssetMissTest::RunTest(con
 
 	FKawaiiProceduralWindPreset CustomPreset;
 	CustomPreset.PresetTag = TAG_KawaiiPhysics_WindPreset_TestUnregistered;
-	CustomPreset.SteadyForce = 123.0f;
+	CustomPreset.ConstantForce = 123.0f;
 	DataAsset->Presets.Add(CustomPreset);
 
 	FKawaiiProceduralWindDynamicParams Params;

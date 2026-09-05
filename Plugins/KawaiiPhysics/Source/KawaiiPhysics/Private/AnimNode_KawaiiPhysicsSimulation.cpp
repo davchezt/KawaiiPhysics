@@ -34,6 +34,9 @@
 #include "KawaiiPhysics.h"
 #include "AnimNode_KawaiiPhysicsInternal.h"
 
+// SimpleWorldCollision CVar（AnimNode_KawaiiPhysics.cpp で定義）
+extern TAutoConsoleVariable<int32> CVarSimpleWorldCollisionEnable;
+
 namespace
 {
 	constexpr float TransientGustLifetimeMargin = 0.2f;
@@ -57,6 +60,7 @@ namespace
 	{
 		FKawaiiPhysicsTransientExternalForce& Entry = Node.TransientForceStore.Items.AddDefaulted_GetRef();
 		Entry.Force = FInstancedStruct::Make<FKawaiiPhysics_ExternalForce_ProceduralWind>();
+		Entry.HandleId = Request.HandleId;
 
 		FKawaiiPhysics_ExternalForce_ProceduralWind* Wind =
 			Entry.Force.GetMutablePtr<FKawaiiPhysics_ExternalForce_ProceduralWind>();
@@ -74,6 +78,11 @@ namespace
 			Wind->RandomForceScaleRange = Source->RandomForceScaleRange;
 			Wind->TimeScale = Source->TimeScale;
 		}
+		if (Request.bRealTimeEnvelope)
+		{
+			// TimeScale 継承後に 1.0 へ戻し、突風エンベロープの持続時間を実秒基準に固定する。
+			Wind->TimeScale = 1.0f;
+		}
 
 		// 明示方向は決定論的なバーストとしてノイズ無し、方向継承時は旧挙動（authored のノイズ入り方向）に合わせて揺らぎも継承する。
 		if (!Request.Direction.IsNearlyZero(KINDA_SMALL_NUMBER))
@@ -85,18 +94,19 @@ namespace
 		{
 			Wind->ExternalForceSpace = Source->ExternalForceSpace;
 			Wind->WindDirection = Source->WindDirection;
-			Wind->DirectionNoiseAngle = Source->DirectionNoiseAngle;
-			Wind->DirectionNoisePeriod = Source->DirectionNoisePeriod;
-			Wind->RandomSeed = Source->RandomSeed;
+			Wind->WindDirectionNoiseAngle = Source->WindDirectionNoiseAngle;
+			Wind->WindDirectionNoisePeriod = Source->WindDirectionNoisePeriod;
+			Wind->Seed = Source->Seed;
 		}
 
 		const float EffectiveTimeScale = Wind->TimeScale;
 		Entry.RemainingLifetime =
-			(FMath::Max(Request.RiseTime, 0.0f) + FMath::Max(Request.DecayTime, 0.0f)) /
+			(FMath::Max(Request.RiseTime, 0.0f) + FMath::Max(Request.HoldTime, 0.0f) +
+				FMath::Max(Request.DecayTime, 0.0f)) /
 			FMath::Max(EffectiveTimeScale, KINDA_SMALL_NUMBER) + TransientGustLifetimeMargin;
 
 		// RequestGust後にProceduralWind本体をコピーするとRuntimeState内のPendingGustが失われる
-		Wind->RequestGust(Request.Strength, Request.RiseTime, Request.DecayTime);
+		Wind->RequestGust(Request.Strength, Request.RiseTime, Request.DecayTime, Request.HoldTime);
 	}
 
 	// worker上で突風用ProceduralWindを構築する
@@ -153,9 +163,96 @@ namespace
 	}
 }
 
+FKawaiiPhysicsSettingsMultiplier FAnimNode_KawaiiPhysics::ComputeEffectivePhysicsSettingsMultiplierScale() const
+{
+	FKawaiiPhysicsSettingsMultiplier Effective;
+
+	for (const FKawaiiPhysicsActiveSettingsMultiplier& Item : TransientForceStore.SettingsMultiplierItems)
+	{
+		float EnvelopeAlpha = 0.0f;
+		if (Item.bExternallyDriven)
+		{
+			EnvelopeAlpha = Item.DrivenAlpha;
+		}
+		else if (Item.bInfiniteHold)
+		{
+			const float RiseAlpha = Item.RiseTime > 0.0f
+				                        ? FMath::Clamp(Item.ElapsedTime / Item.RiseTime, 0.0f, 1.0f)
+				                        : 1.0f;
+			EnvelopeAlpha = Item.PeakAlpha * RiseAlpha;
+		}
+		else
+		{
+			EnvelopeAlpha = Item.PeakAlpha * KawaiiPhysics::EvaluateEnvelopeAlpha01(
+				Item.RiseTime, Item.HoldTime, Item.DecayTime, Item.ElapsedTime);
+		}
+
+		Effective.Damping *= FMath::Lerp(1.0f, Item.Scale.Damping, EnvelopeAlpha);
+		Effective.Stiffness *= FMath::Lerp(1.0f, Item.Scale.Stiffness, EnvelopeAlpha);
+		Effective.WorldDampingLocation *= FMath::Lerp(1.0f, Item.Scale.WorldDampingLocation, EnvelopeAlpha);
+		Effective.WorldDampingRotation *= FMath::Lerp(1.0f, Item.Scale.WorldDampingRotation, EnvelopeAlpha);
+		Effective.Radius *= FMath::Lerp(1.0f, Item.Scale.Radius, EnvelopeAlpha);
+		Effective.LimitAngle *= FMath::Lerp(1.0f, Item.Scale.LimitAngle, EnvelopeAlpha);
+	}
+
+	return Effective;
+}
+
 void FAnimNode_KawaiiPhysics::UpdatePhysicsSettingsOfModifyBones()
 {
 	SCOPE_CYCLE_COUNTER(STAT_KawaiiPhysics_UpdatePhysicsSetting);
+
+	// αはボーンに依存しないためループ前に1回だけ解決する
+	const FKawaiiPhysicsSettingsMultiplier OverrideScale = ComputeEffectivePhysicsSettingsMultiplierScale();
+
+	const FRichCurve* DampingCurve = DampingCurveData.GetRichCurveConst();
+	const FRichCurve* WorldDampingLocationCurve = WorldDampingLocationCurveData.GetRichCurveConst();
+	const FRichCurve* WorldDampingRotationCurve = WorldDampingRotationCurveData.GetRichCurveConst();
+	const FRichCurve* StiffnessCurve = StiffnessCurveData.GetRichCurveConst();
+	const FRichCurve* RadiusCurve = RadiusCurveData.GetRichCurveConst();
+	const FRichCurve* LimitAngleCurve = LimitAngleCurveData.GetRichCurveConst();
+
+	if (DampingCurve->IsEmpty() && WorldDampingLocationCurve->IsEmpty() && WorldDampingRotationCurve->IsEmpty() &&
+		StiffnessCurve->IsEmpty() && RadiusCurve->IsEmpty() && LimitAngleCurve->IsEmpty())
+	{
+		// 全カーブが空なら Eval は時刻非依存のため、フレーム内で1回だけ評価する
+		const float DampingCurveScale = DampingCurve->Eval(0.0f, 1.0f);
+		const float WorldDampingLocationCurveScale = WorldDampingLocationCurve->Eval(0.0f, 1.0f);
+		const float WorldDampingRotationCurveScale = WorldDampingRotationCurve->Eval(0.0f, 1.0f);
+		const float StiffnessCurveScale = StiffnessCurve->Eval(0.0f, 1.0f);
+		const float RadiusCurveScale = RadiusCurve->Eval(0.0f, 1.0f);
+		const float LimitAngleCurveScale = LimitAngleCurve->Eval(0.0f, 1.0f);
+
+		const float Damping = FMath::Clamp(
+			PhysicsSettings.Damping * DampingCurveScale * OverrideScale.Damping, 0.0f, 1.0f);
+		const float WorldDampingLocation = FMath::Clamp(
+			PhysicsSettings.WorldDampingLocation * WorldDampingLocationCurveScale * OverrideScale.WorldDampingLocation,
+			0.0f, 1.0f);
+		const float WorldDampingRotation = FMath::Clamp(
+			PhysicsSettings.WorldDampingRotation * WorldDampingRotationCurveScale * OverrideScale.WorldDampingRotation,
+			0.0f, 1.0f);
+		const float Stiffness = FMath::Clamp(
+			PhysicsSettings.Stiffness * StiffnessCurveScale * OverrideScale.Stiffness, 0.0f, 1.0f);
+		const float Radius = FMath::Max(
+			PhysicsSettings.Radius * RadiusCurveScale * OverrideScale.Radius, 0.0f);
+		const float BaseLimitAngle = FMath::Max(
+			PhysicsSettings.LimitAngle * LimitAngleCurveScale, 0.0f);
+		const float LimitAngle = BaseLimitAngle > 0.0f
+			                         ? FMath::Max(BaseLimitAngle * OverrideScale.LimitAngle, KINDA_SMALL_NUMBER)
+			                         : 0.0f;
+
+		for (FKawaiiPhysicsModifyBone& Bone : ModifyBones)
+		{
+			Bone.PhysicsSettings.Damping = Damping;
+			Bone.PhysicsSettings.WorldDampingLocation = WorldDampingLocation;
+			Bone.PhysicsSettings.WorldDampingRotation = WorldDampingRotation;
+			Bone.PhysicsSettings.Stiffness = Stiffness;
+			Bone.PhysicsSettings.Radius = Radius;
+			Bone.PhysicsSettings.LimitAngle = LimitAngle;
+		}
+
+		return;
+	}
 
 	for (FKawaiiPhysicsModifyBone& Bone : ModifyBones)
 	{
@@ -163,37 +260,42 @@ void FAnimNode_KawaiiPhysics::UpdatePhysicsSettingsOfModifyBones()
 
 		// Damping
 		Bone.PhysicsSettings.Damping = FMath::Clamp(
-			PhysicsSettings.Damping * DampingCurveData.GetRichCurveConst()->Eval(
-				LengthRate, 1.0f), 0.0f, 1.0f);
-		
+			PhysicsSettings.Damping * DampingCurve->Eval(
+				LengthRate, 1.0f) * OverrideScale.Damping, 0.0f, 1.0f);
+
 		// WorldLocationDamping
 		Bone.PhysicsSettings.WorldDampingLocation = FMath::Clamp(
-			PhysicsSettings.WorldDampingLocation * WorldDampingLocationCurveData.GetRichCurveConst()->Eval(
-				LengthRate, 1.0f), 0.0f, 1.0f);
-		
+			PhysicsSettings.WorldDampingLocation * WorldDampingLocationCurve->Eval(
+				LengthRate, 1.0f) * OverrideScale.WorldDampingLocation, 0.0f, 1.0f);
+
 		// WorldRotationDamping
 		Bone.PhysicsSettings.WorldDampingRotation = FMath::Clamp(
-			PhysicsSettings.WorldDampingRotation * WorldDampingRotationCurveData.GetRichCurveConst()->Eval(
-				LengthRate, 1.0f), 0.0f, 1.0f);
-		
+			PhysicsSettings.WorldDampingRotation * WorldDampingRotationCurve->Eval(
+				LengthRate, 1.0f) * OverrideScale.WorldDampingRotation, 0.0f, 1.0f);
+
 		// Stiffness
 		Bone.PhysicsSettings.Stiffness = FMath::Clamp(
-			PhysicsSettings.Stiffness * StiffnessCurveData.GetRichCurveConst()->Eval(
-				LengthRate, 1.0f), 0.0f, 1.0f);
-		
+			PhysicsSettings.Stiffness * StiffnessCurve->Eval(
+				LengthRate, 1.0f) * OverrideScale.Stiffness, 0.0f, 1.0f);
+
 		// Radius
 		Bone.PhysicsSettings.Radius = FMath::Max(
-			PhysicsSettings.Radius * RadiusCurveData.GetRichCurveConst()->Eval(
-				LengthRate, 1.0f), 0.0f);
-		
+			PhysicsSettings.Radius * RadiusCurve->Eval(
+				LengthRate, 1.0f) * OverrideScale.Radius, 0.0f);
+
 		// LimitAngle
-		Bone.PhysicsSettings.LimitAngle = FMath::Max(
-			PhysicsSettings.LimitAngle * LimitAngleCurveData.GetRichCurveConst()->Eval(
+		const float BaseLimitAngle = FMath::Max(
+			PhysicsSettings.LimitAngle * LimitAngleCurve->Eval(
 				LengthRate, 1.0f), 0.0f);
+		// LimitAngle==0 は「制限なし」を意味するため、制限ありのボーンが倍率で0へ落ちて反転しないよう極小値で止める
+		Bone.PhysicsSettings.LimitAngle = BaseLimitAngle > 0.0f
+			                                  ? FMath::Max(BaseLimitAngle * OverrideScale.LimitAngle,
+			                                               KINDA_SMALL_NUMBER)
+			                                  : 0.0f;
 	}
 }
 
-void FAnimNode_KawaiiPhysics::ConsumeAndSweepTransientExternalForces(const float InFrameDeltaTime)
+void FAnimNode_KawaiiPhysics::ConsumeAndRemoveExpiredTransientExternalForces(const float InFrameDeltaTime)
 {
 	for (int32 i = TransientForceStore.Items.Num() - 1; i >= 0; --i)
 	{
@@ -206,11 +308,13 @@ void FAnimNode_KawaiiPhysics::ConsumeAndSweepTransientExternalForces(const float
 
 	TArray<FKawaiiPhysicsTransientExternalForce> PendingForces;
 	TArray<FKawaiiPhysicsTransientGustRequest> PendingGusts;
+	TArray<FKawaiiPhysicsTransientForceStopRequest> PendingStops;
 	if (TransientForceStore.Queue.IsValid())
 	{
 		FScopeLock Lock(&TransientForceStore.Queue->Mutex);
 		PendingForces = MoveTemp(TransientForceStore.Queue->PendingForces);
 		PendingGusts = MoveTemp(TransientForceStore.Queue->PendingGusts);
+		PendingStops = MoveTemp(TransientForceStore.Queue->PendingStops);
 	}
 
 	for (FKawaiiPhysicsTransientExternalForce& PendingForce : PendingForces)
@@ -228,10 +332,257 @@ void FAnimNode_KawaiiPhysics::ConsumeAndSweepTransientExternalForces(const float
 		BuildTransientGustForce(*this, PendingGust);
 	}
 
+	for (const FKawaiiPhysicsTransientForceStopRequest& PendingStop : PendingStops)
+	{
+		if (PendingStop.HandleId == 0)
+		{
+			continue;
+		}
+
+		if (PendingStop.BlendOutTime <= KINDA_SMALL_NUMBER)
+		{
+			for (int32 i = TransientForceStore.Items.Num() - 1; i >= 0; --i)
+			{
+				if (TransientForceStore.Items[i].HandleId == PendingStop.HandleId)
+				{
+					TransientForceStore.Items.RemoveAt(i);
+				}
+			}
+			continue;
+		}
+
+		for (FKawaiiPhysicsTransientExternalForce& Item : TransientForceStore.Items)
+		{
+			if (Item.HandleId != PendingStop.HandleId)
+			{
+				continue;
+			}
+
+			if (FKawaiiPhysics_ExternalForce_ProceduralWind* Wind = GetMutableProceduralWindInNode(Item.Force))
+			{
+				Wind->RequestGustStop(PendingStop.BlendOutTime);
+				// RequestGustStopはエンベロープを現在値からのフェードへ完全に置き換えるため、
+				// 寿命も新フェードに合わせて再設定する（Minで旧残寿命を採用するとフェード途中で掃除されポップが出る）
+				Item.RemainingLifetime =
+					PendingStop.BlendOutTime / FMath::Max(Wind->TimeScale, KINDA_SMALL_NUMBER) +
+					TransientGustLifetimeMargin;
+			}
+			else
+			{
+				Item.RemainingLifetime = FMath::Min(Item.RemainingLifetime, FMath::Max(PendingStop.BlendOutTime, 0.0f));
+			}
+		}
+	}
+
 	while (TransientForceStore.Items.Num() > MaxTransientExternalForces)
 	{
+		UE_LOG(LogKawaiiPhysics, Verbose,
+		       TEXT("Transient external force cap exceeded; dropping oldest force. HandleId=%lld"),
+		       static_cast<long long>(TransientForceStore.Items[0].HandleId));
 		TransientForceStore.Items.RemoveAt(0);
 	}
+}
+
+bool FAnimNode_KawaiiPhysics::ConsumeAndAdvancePhysicsSettingsMultipliers(const float InFrameDeltaTime)
+{
+	auto FindSettingsMultiplierByHandle =
+		[this](const int64 HandleId) -> FKawaiiPhysicsActiveSettingsMultiplier*
+		{
+			for (FKawaiiPhysicsActiveSettingsMultiplier& Item : TransientForceStore.SettingsMultiplierItems)
+			{
+				if (Item.HandleId == HandleId)
+				{
+					return &Item;
+				}
+			}
+			return nullptr;
+		};
+
+	auto StopSettingsMultiplierAtIndex =
+		[this](const int32 Index, const float BlendOutTime)
+		{
+			if (!TransientForceStore.SettingsMultiplierItems.IsValidIndex(Index))
+			{
+				return;
+			}
+
+			FKawaiiPhysicsActiveSettingsMultiplier& Item = TransientForceStore.SettingsMultiplierItems[Index];
+			if (BlendOutTime <= KINDA_SMALL_NUMBER)
+			{
+				TransientForceStore.SettingsMultiplierItems.RemoveAt(Index);
+				return;
+			}
+
+			if (Item.bExternallyDriven)
+			{
+				Item.PeakAlpha = Item.DrivenAlpha;
+			}
+			else
+			{
+				// 現在の適用率を PeakAlpha へ畳み込み、そこから decay だけのエンベロープでフェードさせる。
+				// 乗算なのでフェード中の再Stopでも適用率が跳ね上がらない
+				const float CurrentAlpha = Item.bInfiniteHold
+					                           ? (Item.RiseTime > 0.0f
+						                              ? FMath::Clamp(Item.ElapsedTime / Item.RiseTime, 0.0f, 1.0f)
+						                              : 1.0f)
+					                           : KawaiiPhysics::EvaluateEnvelopeAlpha01(
+						                           Item.RiseTime, Item.HoldTime, Item.DecayTime, Item.ElapsedTime);
+				Item.PeakAlpha *= CurrentAlpha;
+			}
+
+			Item.bInfiniteHold = false;
+			Item.bExternallyDriven = false;
+			Item.DrivenAlpha = 0.0f;
+			Item.LeaseEvaluations = 0;
+			Item.LeaseRemaining = 0;
+			Item.LeaseExpireBlendOutTime = 0.2f;
+			Item.RiseTime = 0.0f;
+			Item.HoldTime = 0.0f;
+			Item.DecayTime = BlendOutTime;
+			Item.ElapsedTime = 0.0f;
+		};
+
+	// 取り込み前に進めることで、このフレームで積まれた時間型は α=0（rise 開始点）から始まる
+	for (FKawaiiPhysicsActiveSettingsMultiplier& Item : TransientForceStore.SettingsMultiplierItems)
+	{
+		Item.ElapsedTime += InFrameDeltaTime;
+		if (Item.bExternallyDriven && Item.LeaseEvaluations > 0)
+		{
+			--Item.LeaseRemaining;
+		}
+	}
+
+	TArray<FKawaiiPhysicsSettingsMultiplierPushRequest> PendingSets;
+	TArray<FKawaiiPhysicsSettingsMultiplierRequest> PendingOverrides;
+	TArray<FKawaiiPhysicsTransientForceStopRequest> PendingStops;
+	if (TransientForceStore.Queue.IsValid())
+	{
+		FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+		PendingSets = MoveTemp(TransientForceStore.Queue->PendingSettingsMultiplierPushes);
+		PendingOverrides = MoveTemp(TransientForceStore.Queue->PendingSettingsMultipliers);
+		PendingStops = MoveTemp(TransientForceStore.Queue->PendingSettingsMultiplierStops);
+	}
+
+	for (const FKawaiiPhysicsSettingsMultiplierPushRequest& PendingSet : PendingSets)
+	{
+		if (PendingSet.HandleId == 0)
+		{
+			continue;
+		}
+
+		FKawaiiPhysicsActiveSettingsMultiplier* Item = FindSettingsMultiplierByHandle(PendingSet.HandleId);
+		if (!Item)
+		{
+			Item = &TransientForceStore.SettingsMultiplierItems.AddDefaulted_GetRef();
+			Item->HandleId = PendingSet.HandleId;
+		}
+
+		Item->Scale = PendingSet.Scale;
+		Item->DrivenAlpha = PendingSet.Alpha;
+		Item->LeaseEvaluations = PendingSet.LeaseEvaluations;
+		Item->LeaseRemaining = PendingSet.LeaseEvaluations;
+		Item->LeaseExpireBlendOutTime = PendingSet.LeaseExpireBlendOutTime;
+		Item->bInfiniteHold = false;
+		Item->bExternallyDriven = true;
+		Item->PeakAlpha = 1.0f;
+		Item->RiseTime = 0.0f;
+		Item->HoldTime = 0.0f;
+		Item->DecayTime = 0.0f;
+		Item->ElapsedTime = 0.0f;
+	}
+
+	for (const FKawaiiPhysicsSettingsMultiplierRequest& PendingOverride : PendingOverrides)
+	{
+		FKawaiiPhysicsActiveSettingsMultiplier* ExistingItem = FindSettingsMultiplierByHandle(PendingOverride.HandleId);
+		FKawaiiPhysicsActiveSettingsMultiplier& Item =
+			ExistingItem ? *ExistingItem : TransientForceStore.SettingsMultiplierItems.AddDefaulted_GetRef();
+		Item.Scale = PendingOverride.Scale;
+		Item.RiseTime = PendingOverride.RiseTime;
+		Item.HoldTime = PendingOverride.HoldTime;
+		Item.DecayTime = PendingOverride.DecayTime;
+		Item.ElapsedTime = 0.0f;
+		Item.PeakAlpha = 1.0f;
+		Item.HandleId = PendingOverride.HandleId;
+		Item.bInfiniteHold = PendingOverride.bInfiniteHold;
+		Item.bExternallyDriven = false;
+		Item.DrivenAlpha = 0.0f;
+		Item.LeaseEvaluations = 0;
+		Item.LeaseRemaining = 0;
+		Item.LeaseExpireBlendOutTime = 0.2f;
+	}
+
+	for (const FKawaiiPhysicsTransientForceStopRequest& PendingStop : PendingStops)
+	{
+		if (PendingStop.HandleId == 0)
+		{
+			continue;
+		}
+
+		for (int32 i = TransientForceStore.SettingsMultiplierItems.Num() - 1; i >= 0; --i)
+		{
+			FKawaiiPhysicsActiveSettingsMultiplier& Item = TransientForceStore.SettingsMultiplierItems[i];
+			if (Item.HandleId != PendingStop.HandleId)
+			{
+				continue;
+			}
+
+			StopSettingsMultiplierAtIndex(i, PendingStop.BlendOutTime);
+		}
+	}
+
+	for (int32 i = TransientForceStore.SettingsMultiplierItems.Num() - 1; i >= 0; --i)
+	{
+		const FKawaiiPhysicsActiveSettingsMultiplier& Item = TransientForceStore.SettingsMultiplierItems[i];
+		if (!Item.bExternallyDriven || Item.LeaseEvaluations <= 0 || Item.LeaseRemaining > 0)
+		{
+			continue;
+		}
+
+		UE_LOG(LogKawaiiPhysics, Verbose,
+		       TEXT("Externally driven physics settings multiplier lease expired. HandleId=%lld BlendOutTime=%.3f"),
+		       static_cast<long long>(Item.HandleId), Item.LeaseExpireBlendOutTime);
+		StopSettingsMultiplierAtIndex(i, Item.LeaseExpireBlendOutTime);
+	}
+
+	for (int32 i = TransientForceStore.SettingsMultiplierItems.Num() - 1; i >= 0; --i)
+	{
+		const FKawaiiPhysicsActiveSettingsMultiplier& Item = TransientForceStore.SettingsMultiplierItems[i];
+		if (!Item.bExternallyDriven && !Item.bInfiniteHold &&
+			Item.ElapsedTime >= Item.RiseTime + Item.HoldTime + Item.DecayTime)
+		{
+			TransientForceStore.SettingsMultiplierItems.RemoveAt(i);
+		}
+	}
+
+	while (TransientForceStore.SettingsMultiplierItems.Num() > MaxPhysicsSettingsMultipliers)
+	{
+		const FKawaiiPhysicsActiveSettingsMultiplier& DroppedItem = TransientForceStore.SettingsMultiplierItems[0];
+#if !UE_BUILD_SHIPPING
+		if (DroppedItem.bInfiniteHold &&
+			!WarnedInfiniteHoldSettingsMultiplierEvictionHandleIds.Contains(DroppedItem.HandleId))
+		{
+			if (WarnedInfiniteHoldSettingsMultiplierEvictionHandleIds.Num() >= MaxWarnedInfiniteHoldSettingsMultiplierEvictionHandleIds)
+			{
+				// 再 init まで無制限に増えないよう上限で丸ごとリセット。警告が再度出ることは許容
+				WarnedInfiniteHoldSettingsMultiplierEvictionHandleIds.Reset();
+			}
+			WarnedInfiniteHoldSettingsMultiplierEvictionHandleIds.Add(DroppedItem.HandleId);
+			UE_LOG(LogKawaiiPhysics, Warning,
+			       TEXT("Infinite-hold physics settings multiplier cap exceeded; dropping oldest override. HandleId=%lld Type=InfiniteHold"),
+			       static_cast<long long>(DroppedItem.HandleId));
+		}
+		else
+#endif
+		{
+			UE_LOG(LogKawaiiPhysics, Verbose,
+			       TEXT("Physics settings multiplier cap exceeded; dropping oldest override. HandleId=%lld Type=%s"),
+			       static_cast<long long>(DroppedItem.HandleId),
+			       DroppedItem.bExternallyDriven ? TEXT("Driven") : (DroppedItem.bInfiniteHold ? TEXT("InfiniteHold") : TEXT("Timed")));
+		}
+		TransientForceStore.SettingsMultiplierItems.RemoveAt(0);
+	}
+
+	return !TransientForceStore.SettingsMultiplierItems.IsEmpty();
 }
 
 
@@ -249,6 +600,12 @@ void FAnimNode_KawaiiPhysics::SimulateModifyBones(FComponentSpacePoseContext& Ou
 	FrameDeltaTime = DeltaTime;
 
 	const USkeletalMeshComponent* SkelComp = Output.AnimInstanceProxy->GetSkelMeshComponent();
+
+	// World Collision のクエリ設定はフレーム内で不変のため、サブステップ×ボーンのループ前に一度だけ構築する
+	if (bAllowWorldCollision && SkelComp)
+	{
+		PrepareWorldCollisionQueryCaches(SkelComp);
+	}
 
 	// Prev/Pose 情報を保存し、SkipSimulate を判定
 	for (FKawaiiPhysicsModifyBone& Bone : ModifyBones)
@@ -553,6 +910,10 @@ void FAnimNode_KawaiiPhysics::SimulateOnce(FComponentSpacePoseContext& Output,
 		}
 	}
 
+	// ExternalForce::PostApply が substep 毎にコリジョン limit を書き換え得るため、
+	// 形状派生値キャッシュは毎ステップ再計算する（コストは形状数オーダーで誤差級）
+	PrepareCollisionShapeCaches();
+
 	// Adjust by Bone Constraints Before Collision
 	if (BoneConstraintIterationCountBeforeCollision > 0)
 	{
@@ -571,6 +932,8 @@ void FAnimNode_KawaiiPhysics::SimulateOnce(FComponentSpacePoseContext& Output,
 	// （ボーン数が多いケースで負荷増）、従来どおりボーン外側の1パスで全形状を処理する。
 	// World判定の時間は関数内の既存STAT（STAT_KawaiiPhysics_WorldCollision）で計測する。
 	int32 NumWorldChecks = 0;
+	// CVarでの全体無効化を毎ボーンで再判定しないようループ外でキャッシュ（Updateブロックと同じ条件）
+	const bool bApplySimpleWorldCollision = bUseSimpleWorldCollision && CVarSimpleWorldCollisionEnable.GetValueOnAnyThread();
 	for (FKawaiiPhysicsModifyBone& Bone : ModifyBones)
 	{
 		if (Bone.bSkipSimulate)
@@ -588,8 +951,8 @@ void FAnimNode_KawaiiPhysics::SimulateOnce(FComponentSpacePoseContext& Output,
 		AdjustByTaperedCapsuleCollision(Bone, TaperedCapsuleLimitsData);
 		AdjustByBoxCollision(Bone, BoxLimits);
 		AdjustByBoxCollision(Bone, BoxLimitsData);
-		AdjustByPlanerCollision(Bone, PlanarLimits);
-		AdjustByPlanerCollision(Bone, PlanarLimitsData);
+		AdjustByPlanarCollision(Bone, PlanarLimits);
+		AdjustByPlanarCollision(Bone, PlanarLimitsData);
 
 		// 共有コリジョン（他の KawaiiPhysics ノードから）
 		if (bUseSharedCollision && !bSharedCollisionSource)
@@ -598,7 +961,18 @@ void FAnimNode_KawaiiPhysics::SimulateOnce(FComponentSpacePoseContext& Output,
 			AdjustByCapsuleCollision(Bone, SharedCapsuleLimits);
 			AdjustByTaperedCapsuleCollision(Bone, SharedTaperedCapsuleLimits);
 			AdjustByBoxCollision(Bone, SharedBoxLimits);
-			AdjustByPlanerCollision(Bone, SharedPlanarLimits);
+			AdjustByPlanarCollision(Bone, SharedPlanarLimits);
+		}
+
+		// シンプルワールドコリジョン（Subsystemが収集したレベル上のsimple collision）
+		if (bApplySimpleWorldCollision)
+		{
+			AdjustBySphereCollision(Bone, SimpleWorldSphericalLimits);
+			AdjustByCapsuleCollision(Bone, SimpleWorldCapsuleLimits);
+			AdjustByTaperedCapsuleCollision(Bone, SimpleWorldTaperedCapsuleLimits);
+			AdjustByBoxCollision(Bone, SimpleWorldBoxLimits);
+			AdjustByBoxCollision(Bone, SimpleWorldGroundBoxLimits);
+			AdjustByConvexCollision(Bone, SimpleWorldConvexLimits);
 		}
 
 		if (bAllowWorldCollision)

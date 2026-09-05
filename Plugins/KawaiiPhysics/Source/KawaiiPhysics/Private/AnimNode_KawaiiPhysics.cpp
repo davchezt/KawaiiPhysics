@@ -11,6 +11,7 @@
 #endif
 #include "KawaiiPhysicsLimitsDataAsset.h"
 #include "KawaiiPhysicsSharedCollisionSubsystem.h"
+#include "KawaiiPhysicsSharedTags.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "Curves/CurveFloat.h"
 #include "Runtime/Launch/Resources/Version.h"
@@ -37,6 +38,8 @@
 #include "KawaiiPhysics.h"
 #include "AnimNode_KawaiiPhysicsInternal.h"
 #include "KawaiiPhysicsNodeWarning.h"
+
+#include <atomic>
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(AnimNode_KawaiiPhysics)
 
@@ -106,6 +109,58 @@ TAutoConsoleVariable<int32> CVarSharedCollisionInitRetryThrottleInterval(
 TAutoConsoleVariable<float> CVarSharedCollisionCleanupInterval(
 	TEXT("a.AnimNode.KawaiiPhysics.SharedCollision.CleanupInterval"), 1.0f,
 	TEXT("クリーンアップ間隔（秒） / Cleanup interval in seconds."));
+TAutoConsoleVariable<int32> CVarSharedCollisionEnableInPreviewWorld(
+	TEXT("a.AnimNode.KawaiiPhysics.SharedCollision.EnableInPreviewWorld"), 1,
+	TEXT("1でPersona等のプレビューワールド（EditorPreview）でもSharedCollision Subsystemを生成する。0で従来どおり生成しない / 1 creates the SharedCollision subsystem in preview worlds (EditorPreview, e.g. Persona) too; 0 keeps the legacy behavior (not created)."));
+
+// SimpleWorldCollision CVars
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionEnable(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.Enable"), 1,
+	TEXT("0でシンプルワールドコリジョンを全体無効化（収集・適用の両方を停止） / 0 disables Simple World Collision entirely (both gathering and application)."));
+TAutoConsoleVariable<float> CVarSimpleWorldCollisionGatherIntervalScale(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.GatherIntervalScale"), 1.0f,
+	TEXT("実効収集間隔に乗算するスケール値 / Scale multiplied into the effective gather interval."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionMaxComponents(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxComponents"), -1,
+	TEXT("-1でDeveloperSettingsの値を使用。0以上でSkelComp単位の最大収集コンポーネント数を上書き / "
+		"-1 uses the DeveloperSettings value; >=0 overrides the max gathered components per SkelComp."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionMaxPhysicsAssetBodies(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxPhysicsAssetBodies"), -1,
+	TEXT("-1でDeveloperSettingsの値を使用。0でPhysicsAssetモードのSkeletalMeshを収集しない。1以上でSkelComp単位最大body数を上書き / "
+		"-1 uses the DeveloperSettings value; 0 does not gather SkeletalMeshes in PhysicsAsset mode; >=1 overrides the max PhysicsAsset bodies per SkelComp."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionMaxConvexPlanes(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.MaxConvexPlanes"), -1,
+	TEXT("-1でDeveloperSettingsの値を使用。0以上でConvex Hull 1つあたりの最大平面数を上書き / "
+		"-1 uses the DeveloperSettings value; >=0 overrides the max planes per convex hull."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionRegatherOnScaleChange(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.RegatherOnScaleChange"), -1,
+	TEXT("-1でDeveloperSettingsの値を使用。0で無効、1でスケール変化時に再収集 / "
+		"-1 uses the DeveloperSettings value; 0 disables, 1 re-gathers on scale change."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionCleanupMaxAge(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.CleanupMaxAge"), 60,
+	TEXT("SimpleWorld Entry/Descのエイジアウト閾値（フレーム数） / Age-out threshold (in frames) for SimpleWorld entries/descs."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionDebugDraw(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.DebugDraw"), 0,
+	TEXT("Subsystem側(GameThread)で収集半径・収集済み形状・地面Boxを可視化 / "
+		"Visualize the gather radius, gathered shapes and ground box on the subsystem side (GameThread)."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionForceEnableOnServer(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.ForceEnableOnServer"), 0,
+	TEXT("1でDedicated Serverでも収集を行う（既定は見た目専用機能のため収集しない） / "
+		"1 gathers even on a Dedicated Server (by default it is skipped since this is a visual-only feature)."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionUseMovementGround(
+	TEXT("a.AnimNode.KawaiiPhysics.SimpleWorldCollision.UseMovementGround"), 1,
+	TEXT("1で所有Actorの地面情報（IKawaiiPhysicsGroundProvider / CharacterMovementComponent）を地面Boxに使う。0で従来の下方向トレースのみ / "
+		"1 uses the owner's ground info (IKawaiiPhysicsGroundProvider / CharacterMovementComponent) for the ground box; 0 uses only the legacy downward trace."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionReaderReleaseMaxAge(
+	TEXT("a.AnimNode.KawaiiPhysics.SharedPublisher.ReaderReleaseMaxAge"), 60,
+	TEXT("共有 Entry の provider が更新を止めてから reader が Entry を解放するまでの猶予フレーム数 / "
+		"Frames a reader keeps a shared entry after its provider stopped updating before releasing it."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionAutoResolveInterval(
+	TEXT("a.AnimNode.KawaiiPhysics.SharedPublisher.AutoResolveInterval"), 30,
+	TEXT("Frames between Auto Simple World Collision checks while running as a local provider."));
+TAutoConsoleVariable<int32> CVarSimpleWorldCollisionSharedPublisherDebugDraw(
+	TEXT("a.AnimNode.KawaiiPhysics.SharedPublisher.DebugDraw"), 0,
+	TEXT("Draw Shared Publisher Simple World Collision labels from the subsystem tick."));
 
 DEFINE_STAT(STAT_KawaiiPhysics_InitModifyBones);
 DEFINE_STAT(STAT_KawaiiPhysics_Eval);
@@ -118,7 +173,7 @@ DEFINE_STAT(STAT_KawaiiPhysics_ApplySyncBone);
 DEFINE_STAT(STAT_KawaiiPhysics_AdjustByCollision);
 DEFINE_STAT(STAT_KawaiiPhysics_AdjustByBoneConstraint);
 DEFINE_STAT(STAT_KawaiiPhysics_UpdateSphericalLimit);
-DEFINE_STAT(STAT_KawaiiPhysics_UpdatePlanerLimit);
+DEFINE_STAT(STAT_KawaiiPhysics_UpdatePlanarLimit);
 DEFINE_STAT(STAT_KawaiiPhysics_WarmUp);
 DEFINE_STAT(STAT_KawaiiPhysics_UpdatePhysicsSetting);
 DEFINE_STAT(STAT_KawaiiPhysics_UpdateCapsuleLimit);
@@ -134,6 +189,8 @@ DEFINE_STAT(STAT_KawaiiPhysics_ConvertSimulationSpace);
 DEFINE_STAT(STAT_KawaiiPhysics_InitializeSharedCollision);
 DEFINE_STAT(STAT_KawaiiPhysics_WriteSharedCollisionToSubsystem);
 DEFINE_STAT(STAT_KawaiiPhysics_UpdateSharedCollisionLimits);
+DEFINE_STAT(STAT_KawaiiPhysics_UpdateSimpleWorldCollisionLimits);
+DEFINE_STAT(STAT_KawaiiPhysics_NumSimpleWorldColliders);
 DEFINE_STAT(STAT_KawaiiPhysics_NumModifyBones);
 DEFINE_STAT(STAT_KawaiiPhysics_NumInterBoneDummyBones);
 DEFINE_STAT(STAT_KawaiiPhysics_NumBridgeDummyBones);
@@ -150,8 +207,19 @@ DEFINE_STAT(STAT_KawaiiPhysics_NumMergedBoneConstraints);
 DEFINE_STAT(STAT_KawaiiPhysics_NumWorldCollisionChecks);
 DEFINE_STAT(STAT_KawaiiPhysics_ModifyBonesMemory);
 
+int32 GetKawaiiPhysicsSharedPublisherReaderReleaseMaxAge()
+{
+	return CVarSimpleWorldCollisionReaderReleaseMaxAge.GetValueOnAnyThread();
+}
+
+int32 GetKawaiiPhysicsSharedPublisherAutoResolveInterval()
+{
+	return CVarSimpleWorldCollisionAutoResolveInterval.GetValueOnAnyThread();
+}
+
 FAnimNode_KawaiiPhysics::FAnimNode_KawaiiPhysics()
 {
+	SimpleWorldCollisionSharedTag = TAG_KawaiiPhysics_Shared_Default;
 }
 
 void FAnimNode_KawaiiPhysics::Initialize_AnyThread(const FAnimationInitializeContext& Context)
@@ -188,6 +256,29 @@ void FAnimNode_KawaiiPhysics::Initialize_AnyThread(const FAnimationInitializeCon
 	SharedBoxLimits.Reset();
 	SharedPlanarLimits.Reset();
 
+	// シンプルワールドコリジョンのキャッシュをリセット
+	ReleaseSimpleWorldCollision();
+	SimpleWorldMergedScratch.Reset();
+	SimpleWorldGroundScratch.Reset();
+	SimpleWorldSphericalLimits.Reset();
+	SimpleWorldCapsuleLimits.Reset();
+	SimpleWorldTaperedCapsuleLimits.Reset();
+	SimpleWorldBoxLimits.Reset();
+	SimpleWorldGroundBoxLimits.Reset();
+	SimpleWorldConvexLimits.Reset();
+	LastReadSimpleWorldShapeSerial = 0;
+	LastReadSimpleWorldGroundSerial = 0;
+	LastReadSimpleWorldMemberSerialSum = 0;
+	SimpleWorldReaderRetryCount = 0;
+	bSimpleWorldReaderWarningLogged = false;
+	SimpleWorldResolvedSource = EKawaiiPhysicsSimpleWorldCollisionSource::Local;
+	SimpleWorldAutoResolveCountdown = 0;
+#if !UE_BUILD_SHIPPING
+	bSimpleWorldInvalidSharedTagWarningLogged = false;
+#endif
+	bSimpleWorldRadiusChecked = false;
+	SimpleWorldRadiusCheckDeferrals = 0;
+
 	ApplyLimitsDataAsset(RequiredBones);
 	ApplyPhysicsAsset(RequiredBones);
 	ApplyMirrorLimits(RequiredBones);
@@ -202,14 +293,8 @@ void FAnimNode_KawaiiPhysics::Initialize_AnyThread(const FAnimationInitializeCon
 	SubstepAccumulator = 0.0f;
 	bSubstepPoseInitialized = false;
 
-	// ノード再初期化時は実行時専用の一時外力を破棄する
-	TransientForceStore.Items.Reset();
-	if (TransientForceStore.Queue.IsValid())
-	{
-		FScopeLock Lock(&TransientForceStore.Queue->Mutex);
-		TransientForceStore.Queue->PendingForces.Reset();
-		TransientForceStore.Queue->PendingGusts.Reset();
-	}
+	// ノード再初期化時は実行時専用の一時外力と物理設定倍率を破棄する
+	ResetTransientRuntimeState();
 
 	for (int i = 0; i < ExternalForces.Num(); ++i)
 	{
@@ -254,31 +339,200 @@ void FAnimNode_KawaiiPhysics::ResetDynamics(ETeleportType InTeleportType)
 	bSubstepPoseInitialized = false;
 }
 
-void FAnimNode_KawaiiPhysics::RequestTransientExternalForce(FInstancedStruct&& InForce, const float InLifetimeSeconds)
+int64 FAnimNode_KawaiiPhysics::GenerateTransientHandleId()
 {
+	static std::atomic<int64> NextHandleId{1};
+	return NextHandleId.fetch_add(1, std::memory_order_relaxed);
+}
+
+int64 FAnimNode_KawaiiPhysics::RequestTransientExternalForce(FInstancedStruct&& InForce, const float InLifetimeSeconds,
+                                                             const int64 InHandleId)
+{
+	const int64 HandleId = InHandleId != 0 ? InHandleId : GenerateTransientHandleId();
+
 	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
 	DropOldestPendingTransientForceIfFull(*TransientForceStore.Queue, false);
 
 	FKawaiiPhysicsTransientExternalForce Entry;
 	Entry.Force = MoveTemp(InForce);
 	Entry.RemainingLifetime = InLifetimeSeconds;
+	Entry.HandleId = HandleId;
 
 	TransientForceStore.Queue->PendingForces.Emplace(MoveTemp(Entry));
+	return HandleId;
 }
 
-void FAnimNode_KawaiiPhysics::RequestTransientGust(const float Strength, const float RiseTime, const float DecayTime,
-                                                   const FVector& GustDirection, const int32 InheritForceIndex)
+int64 FAnimNode_KawaiiPhysics::RequestTransientGust(const float Strength, const float RiseTime, const float DecayTime,
+                                                    const FVector& GustDirection, const int32 InheritForceIndex,
+                                                    const float HoldTime, const int64 InHandleId,
+                                                    const bool bRealTimeEnvelope)
 {
 	FKawaiiPhysicsTransientGustRequest Request;
 	Request.Strength = Strength;
 	Request.RiseTime = RiseTime;
 	Request.DecayTime = DecayTime;
+	Request.HoldTime = HoldTime;
 	Request.Direction = GustDirection;
 	Request.InheritForceIndex = InheritForceIndex;
+	Request.HandleId = InHandleId;
+	Request.bRealTimeEnvelope = bRealTimeEnvelope;
 
 	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
 	DropOldestPendingTransientForceIfFull(*TransientForceStore.Queue, true);
 	TransientForceStore.Queue->PendingGusts.Emplace(Request);
+	return InHandleId;
+}
+
+void FAnimNode_KawaiiPhysics::RequestStopTransientExternalForce(const int64 HandleId, const float BlendOutTime)
+{
+	if (HandleId == 0 || !TransientForceStore.Queue.IsValid())
+	{
+		return;
+	}
+
+	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+	for (FKawaiiPhysicsTransientForceStopRequest& PendingStop : TransientForceStore.Queue->PendingStops)
+	{
+		if (PendingStop.HandleId == HandleId)
+		{
+			PendingStop.BlendOutTime = BlendOutTime;
+			return;
+		}
+	}
+
+	if (TransientForceStore.Queue->PendingStops.Num() >= MaxTransientExternalForces)
+	{
+		// 評価が走らないノードへの連打でも停止要求が MaxTransientExternalForces を超えないよう最古から破棄する。
+		TransientForceStore.Queue->PendingStops.RemoveAt(0);
+	}
+
+	FKawaiiPhysicsTransientForceStopRequest Request;
+	Request.HandleId = HandleId;
+	Request.BlendOutTime = BlendOutTime;
+	TransientForceStore.Queue->PendingStops.Emplace(Request);
+}
+
+int64 FAnimNode_KawaiiPhysics::RequestStartPhysicsSettingsMultiplier(const FKawaiiPhysicsSettingsMultiplier& InScale,
+                                                              const float RiseTime, const float HoldTime,
+                                                              const float DecayTime, const int64 InHandleId,
+                                                              const bool bInfiniteHold)
+{
+	const int64 HandleId = InHandleId != 0 ? InHandleId : GenerateTransientHandleId();
+
+	FKawaiiPhysicsSettingsMultiplierRequest Request;
+	Request.Scale = InScale;
+	Request.RiseTime = RiseTime;
+	Request.HoldTime = HoldTime;
+	Request.DecayTime = DecayTime;
+	Request.HandleId = HandleId;
+	Request.bInfiniteHold = bInfiniteHold;
+
+	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+	if (TransientForceStore.Queue->PendingSettingsMultipliers.Num() >= MaxPhysicsSettingsMultipliers)
+	{
+		// 評価が走らないノードへの連打でも pending が MaxPhysicsSettingsMultipliers を超えないよう最古から破棄する。
+		TransientForceStore.Queue->PendingSettingsMultipliers.RemoveAt(0);
+	}
+
+	TransientForceStore.Queue->PendingSettingsMultipliers.Emplace(Request);
+	return HandleId;
+}
+
+bool FAnimNode_KawaiiPhysics::RequestPushPhysicsSettingsMultiplier(const FKawaiiPhysicsSettingsMultiplier& InScale,
+                                                                const float InAlpha, const int64 InHandleId,
+                                                                const int32 LeaseEvaluations,
+                                                                const float LeaseExpireBlendOutTime)
+{
+	if (InHandleId == 0 || !TransientForceStore.Queue.IsValid())
+	{
+		return false;
+	}
+
+	FKawaiiPhysicsSettingsMultiplierPushRequest Request;
+	Request.Scale = InScale;
+	Request.Alpha = FMath::Clamp(InAlpha, 0.0f, 1.0f);
+	Request.HandleId = InHandleId;
+	Request.LeaseEvaluations = FMath::Max(0, LeaseEvaluations);
+	Request.LeaseExpireBlendOutTime = FMath::Max(0.0f, LeaseExpireBlendOutTime);
+
+	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+	TransientForceStore.Queue->PendingSettingsMultiplierStops.RemoveAll(
+		[InHandleId](const FKawaiiPhysicsTransientForceStopRequest& PendingStop)
+		{
+			return PendingStop.HandleId == InHandleId;
+		});
+	TransientForceStore.Queue->PendingSettingsMultipliers.RemoveAll(
+		[InHandleId](const FKawaiiPhysicsSettingsMultiplierRequest& PendingOverride)
+		{
+			return PendingOverride.HandleId == InHandleId;
+		});
+
+	for (FKawaiiPhysicsSettingsMultiplierPushRequest& PendingSet : TransientForceStore.Queue->PendingSettingsMultiplierPushes)
+	{
+		if (PendingSet.HandleId == InHandleId)
+		{
+			PendingSet = Request;
+			return true;
+		}
+	}
+
+	if (TransientForceStore.Queue->PendingSettingsMultiplierPushes.Num() >= MaxPhysicsSettingsMultipliers)
+	{
+		// 評価が走らないノードへの連打でも Push 要求が MaxPhysicsSettingsMultipliers を超えないよう最古から破棄する。
+		TransientForceStore.Queue->PendingSettingsMultiplierPushes.RemoveAt(0);
+	}
+
+	TransientForceStore.Queue->PendingSettingsMultiplierPushes.Emplace(Request);
+	return true;
+}
+
+void FAnimNode_KawaiiPhysics::RequestStopPhysicsSettingsMultiplier(const int64 HandleId, const float BlendOutTime)
+{
+	if (HandleId == 0 || !TransientForceStore.Queue.IsValid())
+	{
+		return;
+	}
+
+	FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+	for (FKawaiiPhysicsTransientForceStopRequest& PendingStop : TransientForceStore.Queue->PendingSettingsMultiplierStops)
+	{
+		if (PendingStop.HandleId == HandleId)
+		{
+			PendingStop.BlendOutTime = BlendOutTime;
+			return;
+		}
+	}
+
+	if (TransientForceStore.Queue->PendingSettingsMultiplierStops.Num() >= MaxPhysicsSettingsMultipliers)
+	{
+		// 評価が走らないノードへの連打でも停止要求が MaxPhysicsSettingsMultipliers を超えないよう最古から破棄する。
+		TransientForceStore.Queue->PendingSettingsMultiplierStops.RemoveAt(0);
+	}
+
+	FKawaiiPhysicsTransientForceStopRequest Request;
+	Request.HandleId = HandleId;
+	Request.BlendOutTime = BlendOutTime;
+	TransientForceStore.Queue->PendingSettingsMultiplierStops.Emplace(Request);
+}
+
+void FAnimNode_KawaiiPhysics::ResetTransientRuntimeState()
+{
+	TransientForceStore.Items.Reset();
+	TransientForceStore.SettingsMultiplierItems.Reset();
+#if !UE_BUILD_SHIPPING
+	WarnedInfiniteHoldSettingsMultiplierEvictionHandleIds.Reset();
+#endif
+	bPhysicsSettingsMultiplierAppliedLastUpdate = false;
+	if (TransientForceStore.Queue.IsValid())
+	{
+		FScopeLock Lock(&TransientForceStore.Queue->Mutex);
+		TransientForceStore.Queue->PendingForces.Reset();
+		TransientForceStore.Queue->PendingGusts.Reset();
+		TransientForceStore.Queue->PendingStops.Reset();
+		TransientForceStore.Queue->PendingSettingsMultipliers.Reset();
+		TransientForceStore.Queue->PendingSettingsMultiplierPushes.Reset();
+		TransientForceStore.Queue->PendingSettingsMultiplierStops.Reset();
+	}
 }
 
 void FAnimNode_KawaiiPhysics::UpdateInternal(const FAnimationUpdateContext& Context)
@@ -505,10 +759,14 @@ void FAnimNode_KawaiiPhysics::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 
 	}
 
+	// 倍率は UpdatePhysicsSettingsOfModifyBones より前に取り込み、このフレームの倍率を確定させる
+	const bool bHasActiveSettingsMultiplier = ConsumeAndAdvancePhysicsSettingsMultipliers(DeltaTime);
+
 	// 各パラメータとコリジョンを更新する
-	if (!bInitPhysicsSettings || bUpdatePhysicsSettingsInGame)
+	if (ShouldUpdatePhysicsSettings(bHasActiveSettingsMultiplier))
 	{
 		UpdatePhysicsSettingsOfModifyBones();
+		bPhysicsSettingsMultiplierAppliedLastUpdate = bHasActiveSettingsMultiplier;
 
 #if WITH_EDITORONLY_DATA
 		if (!bEditing)
@@ -527,8 +785,8 @@ void FAnimNode_KawaiiPhysics::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 	UpdateTaperedCapsuleLimits(TaperedCapsuleLimitsData, Output, BoneContainer, ComponentTransform);
 	UpdateBoxLimits(BoxLimits, Output, BoneContainer, ComponentTransform);
 	UpdateBoxLimits(BoxLimitsData, Output, BoneContainer, ComponentTransform);
-	UpdatePlanerLimits(PlanarLimits, Output, BoneContainer, ComponentTransform);
-	UpdatePlanerLimits(PlanarLimitsData, Output, BoneContainer, ComponentTransform);
+	UpdatePlanarLimits(PlanarLimits, Output, BoneContainer, ComponentTransform);
+	UpdatePlanarLimits(PlanarLimitsData, Output, BoneContainer, ComponentTransform);
 
 	// 共有コリジョンの初期化と更新（有効時のみ）。reinit処理は関数冒頭で実行済み。
 	// subsystemはロックでスレッドセーフ化済みのためWorker(AnyThread)で実行でき、PreUpdate(GameThread)を介さない。
@@ -579,6 +837,42 @@ void FAnimNode_KawaiiPhysics::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 		}
 	}
 
+	// シンプルワールドコリジョン（Subsystemが収集したレベル上のsimple collisionをWorkerから読むだけ）
+	// CVarで全体無効化されている間はUpdateを行わず、else側でSimpleWorldXxxLimitsをResetして適用もスキップする
+	if (bUseSimpleWorldCollision && CVarSimpleWorldCollisionEnable.GetValueOnAnyThread())
+	{
+		if (!bSimpleWorldCollisionInitialized)
+		{
+			InitializeSimpleWorldCollision();
+		}
+		if (CachedSimpleWorldEntry.IsValid() || bSimpleWorldReaderMode)
+		{
+			UpdateSimpleWorldCollisionLimits(Output);
+			if (TeleportType == ETeleportType::TeleportPhysics && CachedSimpleWorldEntry.IsValid())
+			{
+				CachedSimpleWorldEntry->RequestRegather();
+			}
+		}
+	}
+	else if (bSimpleWorldCollisionInitialized || CachedSimpleWorldEntry.IsValid())
+	{
+		// ランタイム無効化時は自Descを即時解除し、古い押し出しを残さない
+		ReleaseSimpleWorldCollision();
+		SimpleWorldMergedScratch.Reset();
+		SimpleWorldGroundScratch.Reset();
+		SimpleWorldSphericalLimits.Reset();
+		SimpleWorldCapsuleLimits.Reset();
+		SimpleWorldTaperedCapsuleLimits.Reset();
+		SimpleWorldBoxLimits.Reset();
+		SimpleWorldGroundBoxLimits.Reset();
+		SimpleWorldConvexLimits.Reset();
+		LastReadSimpleWorldShapeSerial = 0;
+		LastReadSimpleWorldGroundSerial = 0;
+		LastReadSimpleWorldMemberSerialSum = 0;
+		SimpleWorldReaderRetryCount = 0;
+		bSimpleWorldReaderWarningLogged = false;
+	}
+
 	// 入力規模カウンタ & メモリの更新（毎フレーム。負荷=N×L等の相関とダミー膨張の可視化用）
 	SET_DWORD_STAT(STAT_KawaiiPhysics_NumSphereColliders, SphericalLimits.Num() + SphericalLimitsData.Num());
 	SET_DWORD_STAT(STAT_KawaiiPhysics_NumCapsuleColliders, CapsuleLimits.Num() + CapsuleLimitsData.Num());
@@ -589,6 +883,10 @@ void FAnimNode_KawaiiPhysics::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 	SET_DWORD_STAT(STAT_KawaiiPhysics_NumSharedColliders,
 	               SharedSphericalLimits.Num() + SharedCapsuleLimits.Num() + SharedTaperedCapsuleLimits.Num() +
 	               SharedBoxLimits.Num() + SharedPlanarLimits.Num());
+	SET_DWORD_STAT(STAT_KawaiiPhysics_NumSimpleWorldColliders,
+	               SimpleWorldSphericalLimits.Num() + SimpleWorldCapsuleLimits.Num() +
+	               SimpleWorldTaperedCapsuleLimits.Num() + SimpleWorldBoxLimits.Num() +
+	               SimpleWorldGroundBoxLimits.Num() + SimpleWorldConvexLimits.Num());
 	SET_DWORD_STAT(STAT_KawaiiPhysics_NumMergedBoneConstraints, MergedBoneConstraints.Num());
 	SET_MEMORY_STAT(STAT_KawaiiPhysics_ModifyBonesMemory,
 	                ModifyBones.GetAllocatedSize() + MergedBoneConstraints.GetAllocatedSize());
@@ -600,7 +898,7 @@ void FAnimNode_KawaiiPhysics::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 	UpdateSkelCompMove(Output, ComponentTransform);
 
 	// 一時外力は評価ごとに1回だけ取り込み、WarmUpの反復やTeleport時のSimulateスキップに左右されないようにする
-	ConsumeAndSweepTransientExternalForces(DeltaTime);
+	ConsumeAndRemoveExpiredTransientExternalForces(DeltaTime);
 
 	// 物理の荒ぶりを回避するための空回し処理
 	if (bNeedWarmUp && WarmUpFrames > 0)
@@ -697,6 +995,8 @@ void FAnimNode_KawaiiPhysics::OnInitializeAnimInstance(const FAnimInstanceProxy*
 {
 	FAnimNode_SkeletalControlBase::OnInitializeAnimInstance(InProxy, InAnimInstance);
 
+	CachedSimpleWorldCollisionSkelComp.Reset();
+
 	// 共有コリジョン初期化で使うSubsystemとowner ActorをGameThreadで1回だけ解決してキャッシュする。
 	// （Evaluate(AnyThread)でのGetWorld/GetSubsystem/GetOwner回避。ファミリーrootはアタッチ変更追従のためEvaluate側でownerから都度解決）
 	if (InAnimInstance)
@@ -708,6 +1008,7 @@ void FAnimNode_KawaiiPhysics::OnInitializeAnimInstance(const FAnimInstanceProxy*
 		if (const USkeletalMeshComponent* SkelComp = InAnimInstance->GetSkelMeshComponent())
 		{
 			CachedSharedCollisionOwnerActor = SkelComp->GetOwner();
+			CachedSimpleWorldCollisionSkelComp = SkelComp;
 		}
 	}
 

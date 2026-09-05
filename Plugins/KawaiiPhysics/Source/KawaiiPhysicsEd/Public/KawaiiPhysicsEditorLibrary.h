@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
 #include "KawaiiPhysicsPresetDataAsset.h"
+#include "KawaiiPhysicsSimpleWorldCollision.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "UObject/SoftObjectPath.h"
@@ -14,6 +15,7 @@
 
 class UAnimBlueprint;
 class UAnimGraphNode_KawaiiPhysics;
+class UAnimGraphNode_KawaiiPhysicsSharedPublisher;
 class USkeleton;
 
 UENUM(BlueprintType)
@@ -46,6 +48,40 @@ struct KAWAIIPHYSICSED_API FKawaiiPhysicsGraphNodeHandle
 
 	UPROPERTY()
 	TWeakObjectPtr<UAnimGraphNode_KawaiiPhysics> Node;
+
+	bool IsValid() const
+	{
+		return Node.IsValid();
+	}
+};
+
+/**
+ * KawaiiPhysics Shared Publisher エディタグラフノードへのハンドル。
+ * Handle to a KawaiiPhysics Shared Publisher editor graph node.
+ */
+USTRUCT(BlueprintType)
+struct KAWAIIPHYSICSED_API FKawaiiPhysicsSharedPublisherGraphNodeHandle
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TWeakObjectPtr<UAnimGraphNode_KawaiiPhysicsSharedPublisher> Node;
+
+	/** ノードを含む AnimBlueprint / AnimBlueprint that owns the node. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	TObjectPtr<UAnimBlueprint> AnimBlueprint = nullptr;
+
+	/** エディタグラフノードの GUID / GUID of the editor graph node. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	FGuid NodeGuid;
+
+	/** Shared Group Tag / Shared Group Tag. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	FGameplayTag SharedGroupTag;
+
+	/** ノードを含むグラフ名 / Name of the graph that owns the node. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	FName GraphName;
 
 	bool IsValid() const
 	{
@@ -174,6 +210,15 @@ struct KAWAIIPHYSICSED_API FKawaiiPhysicsNodeAuditEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
 	bool bSharedCollisionSource = false;
 
+	/** シンプルワールドコリジョンが有効か / Whether Simple World Collision is enabled. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	bool bUseSimpleWorldCollision = false;
+
+	/** シンプルワールドコリジョンで収集した SkeletalMeshComponent との当たり方 / How Simple World Collision collides with gathered SkeletalMeshComponents. */
+	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
+	EKawaiiPhysicsSimpleWorldSkeletalMeshCollision SimpleWorldCollisionSkeletalMeshCollision =
+		EKawaiiPhysicsSimpleWorldSkeletalMeshCollision::None;
+
 	/** Wind が有効か / Whether wind is enabled. */
 	UPROPERTY(BlueprintReadOnly, Category = "Kawaii Physics|Editor")
 	bool bEnableWind = false;
@@ -248,9 +293,9 @@ struct KAWAIIPHYSICSED_API FKawaiiPhysicsNodePlacementRequest
 		EKawaiiPhysicsNodePlacementDirectionOverride::Default;
 };
 
-/** Upsert 時に既存ノードを識別するキー / Key used to identify existing nodes during upsert placement. */
+/** Match 時に既存ノードを識別するキー / Key used to identify existing nodes to match during placement. */
 UENUM(BlueprintType)
-enum class EKawaiiPhysicsPlacementUpsertKey : uint8
+enum class EKawaiiPhysicsPlacementMatchKey : uint8
 {
 	None,
 	Tag,
@@ -279,6 +324,14 @@ public:
 		const FGameplayTagContainer& FilterTags,
 		bool bFilterExactMatch = false);
 
+	/**
+	 * AnimBlueprint 内の KawaiiPhysics Shared Publisher グラフノードを収集する。
+	 * Collect KawaiiPhysics Shared Publisher graph nodes in an AnimBlueprint.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
+	static TArray<FKawaiiPhysicsSharedPublisherGraphNodeHandle> CollectKawaiiPhysicsSharedPublisherGraphNodes(
+		UAnimBlueprint* AnimBlueprint);
+
 	/** AnimBlueprint 内の KawaiiPhysics グラフノードを NodeGuid で検索する（タグフィルタなしで全グラフを走査） / Finds a KawaiiPhysics graph node inside an AnimBlueprint by NodeGuid, scanning all graphs with no tag filter. */
 	static UAnimGraphNode_KawaiiPhysics* FindGraphNodeByGuid(
 		const FSoftObjectPath& AnimBlueprintPath,
@@ -288,26 +341,26 @@ public:
 	 * プロジェクト内の KawaiiPhysics プリセットDataAssetを列挙してロードする。
 	 * Enumerate and load all KawaiiPhysics preset data assets in the project.
 	 */
-	static void GetAllPresetAssets(TArray<TStrongObjectPtr<UKawaiiPhysicsPresetDataAsset>>& OutPresets);
+	static void FindAllPresetAssetData(TArray<TStrongObjectPtr<UKawaiiPhysicsPresetDataAsset>>& OutPresets);
 
 	/**
-	 * プロジェクト内の KawaiiPhysics プリセットDataAssetを Blueprint / Python 向けの生ポインタ配列で返す。C++ 呼び出し側は GC 安全性のため GetAllPresetAssets (TStrongObjectPtr) を使用すること。
-	 * Return all KawaiiPhysics preset data assets as raw pointers for Blueprint / Python. C++ callers should use GetAllPresetAssets (TStrongObjectPtr) for GC safety.
+	 * プロジェクト内の KawaiiPhysics プリセットDataAssetを Blueprint / Python 向けの生ポインタ配列で返す。C++ 呼び出し側は GC 安全性のため FindAllPresetAssetData (TStrongObjectPtr) を使用すること。
+	 * Return all KawaiiPhysics preset data assets as raw pointers for Blueprint / Python. C++ callers should use FindAllPresetAssetData (TStrongObjectPtr) for GC safety.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "KawaiiPhysics|Editor|Preset")
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor|Preset")
 	static TArray<UKawaiiPhysicsPresetDataAsset*> FindAllPresetAssets();
 
 	/**
 	 * 指定 Content パス配下の AnimBlueprint アセットを列挙する（空なら /Game）。
 	 * Enumerate AnimBlueprint assets under Content paths (uses /Game when empty).
 	 */
-	static void GetAnimBlueprintAssets(const TArray<FString>& ContentPaths, TArray<FAssetData>& OutAssets);
+	static void FindAnimBlueprintAssetData(const TArray<FString>& ContentPaths, TArray<FAssetData>& OutAssets);
 
 	/**
 	 * 指定 Content パス配下の AnimBlueprint を、GameplayTag の SearchableName 依存関係でロードなしに事前絞り込みする。FilterTags が空なら全 AnimBlueprint を返す。非 Exact では保存タグ名のプレフィックス一致で子タグ（タグ辞書未登録を含む）も対象にし、未保存の dirty パッケージは常に候補へ含める。既知の限界: UE4.15 未満保存の極端に古いパッケージ、多段タグリダイレクト。
 	 * Pre-filter AnimBlueprint assets under Content paths without loading them by GameplayTag SearchableName dependencies. Empty FilterTags returns all AnimBlueprint assets. Non-exact matching includes child tags by saved tag-name prefix matching, including tags not registered in the current dictionary, and unsaved dirty packages are always kept as candidates. Known limits: extremely old packages saved before UE4.15 and multi-hop tag redirects.
 	 */
-	static void GetAnimBlueprintAssetsReferencingTags(
+	static void FindAnimBlueprintAssetDataReferencingTags(
 		const FGameplayTagContainer& FilterTags,
 		bool bFilterExactMatch,
 		const TArray<FString>& ContentPaths,
@@ -332,24 +385,35 @@ public:
 		const TArray<FString>& ContentPaths);
 
 	/**
-	 * AnimGraph に KawaiiPhysics ノードを追加またはUpsertする。bAutoConnect 指定時は Result ノード直前へ直列に接続する。Comment 指定時は MCP コメント枠を追加する。
-	 * Add or upsert KawaiiPhysics nodes into an AnimGraph. When bAutoConnect is set, nodes are connected in series just before the Result node. A non-empty Comment adds an MCP comment frame.
+	 * AnimGraph に KawaiiPhysics ノードを追加または更新する。bAutoConnect 指定時は Result ノード直前へ直列に接続する。Comment 指定時は MCP コメント枠を追加する。
+	 * Add or update KawaiiPhysics nodes into an AnimGraph. When bAutoConnect is set, nodes are connected in series just before the Result node. A non-empty Comment adds an MCP comment frame.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor",
 		meta=(AutoCreateRefTerm = "Requests,Comment,Prompt"))
 	static TArray<FKawaiiPhysicsGraphNodeHandle> AddKawaiiPhysicsNodes(
 		UAnimBlueprint* AnimBlueprint,
 		const TArray<FKawaiiPhysicsNodePlacementRequest>& Requests,
-		EKawaiiPhysicsPlacementUpsertKey UpsertKey = EKawaiiPhysicsPlacementUpsertKey::None,
+		EKawaiiPhysicsPlacementMatchKey MatchKey = EKawaiiPhysicsPlacementMatchKey::None,
 		FName GraphName = NAME_None,
 		const FString& Comment = TEXT(""),
 		const FString& Prompt = TEXT(""));
 
 	/**
+	 * AnimGraph に KawaiiPhysics Shared Publisher ノードを追加する。bReuseExisting 指定時は同 Tag の既存ノードを返す。
+	 * Add a KawaiiPhysics Shared Publisher node to the AnimGraph. With bReuseExisting, returns an existing node with the same tag.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
+	static FKawaiiPhysicsSharedPublisherGraphNodeHandle AddKawaiiPhysicsSharedPublisherNode(
+		UAnimBlueprint* AnimBlueprint,
+		FGameplayTag SharedGroupTag,
+		bool bReuseExisting = true,
+		bool bAutoConnect = true);
+
+	/**
 	 * AnimGraph 上のコメントノード一覧を返す。
 	 * Returns comment nodes in the AnimGraph.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
+	UFUNCTION(BlueprintPure, Category = "Kawaii Physics|Editor")
 	static TArray<FKawaiiPhysicsAnimGraphCommentInfo> GetAnimGraphComments(
 		UAnimBlueprint* AnimBlueprint,
 		FName GraphName = NAME_None);
@@ -364,19 +428,23 @@ public:
 		const TArray<FKawaiiPhysicsNodePlacementRequest>& Requests);
 
 	/**
-	 * スケルトンの参照ボーン名を正規表現で解決する。既存 ApplyRegex と同じく部分一致可能な FindNext() を使う。
-	 * Resolve reference bone names by regex. Uses the existing ApplyRegex-style FindNext() behavior, so partial matches are possible.
+	 * スケルトンの参照ボーン名を正規表現で検索する。既存 ApplyRegex と同じく部分一致可能な FindNext() を使う。
+	 * Find reference bone names by regex. Uses the existing ApplyRegex-style FindNext() behavior, so partial matches are possible.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
-	static TArray<FName> ResolveBonesByPattern(USkeleton* Skeleton, const FString& Pattern);
+	static TArray<FName> FindBonesByPattern(USkeleton* Skeleton, const FString& Pattern);
 
 	/** グラフノードハンドルが有効か / Check whether a graph node handle is valid. */
 	UFUNCTION(BlueprintPure, Category = "Kawaii Physics|Editor")
 	static bool IsGraphNodeHandleValid(const FKawaiiPhysicsGraphNodeHandle& Handle);
 
+	/** Shared Publisher グラフノードハンドルが有効か / Check whether a Shared Publisher graph node handle is valid. */
+	UFUNCTION(BlueprintPure, Category = "Kawaii Physics|Editor")
+	static bool IsSharedPublisherGraphNodeHandleValid(const FKawaiiPhysicsSharedPublisherGraphNodeHandle& Handle);
+
 	/** ノードプロパティを文字列で設定 / Set a node property from string. */
 	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
-	static bool SetGraphNodePropertyByString(
+	static bool SetGraphNodePropertyFromString(
 		const FKawaiiPhysicsGraphNodeHandle& Handle,
 		FName PropertyName,
 		const FString& Value);
@@ -388,9 +456,22 @@ public:
 		FName PropertyName,
 		FString& OutValue);
 
+	/** Shared Publisher ノードプロパティを文字列で設定 / Set a Shared Publisher node property from string. */
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
+	static bool SetSharedPublisherNodePropertyFromString(
+		const FKawaiiPhysicsSharedPublisherGraphNodeHandle& Handle,
+		FName PropertyName,
+		const FString& Value);
+
+	/** Shared Publisher ノードプロパティを文字列で取得 / Get a Shared Publisher node property as string. */
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
+	static FString GetSharedPublisherNodePropertyAsString(
+		const FKawaiiPhysicsSharedPublisherGraphNodeHandle& Handle,
+		FName PropertyName);
+
 	/** プリセット内ノードプロパティを文字列で設定 / Set a preset node property from string. */
 	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
-	static bool SetPresetNodePropertyByString(
+	static bool SetPresetNodePropertyFromString(
 		UKawaiiPhysicsPresetDataAsset* Preset,
 		FName PropertyName,
 		const FString& Value);
@@ -406,7 +487,7 @@ public:
 	 * タグ名配列から GameplayTagContainer を作る（未登録タグ名は警告してスキップ。入力非空で全滅した場合は false）。
 	 * Make a GameplayTagContainer from tag names (unregistered names are skipped with a warning; returns false when non-empty input resolves to no tags).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "KawaiiPhysics|Editor|Preset")
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor|Preset")
 	static bool MakeGameplayTagContainerFromNames(
 		const TArray<FName>& TagNames,
 		FGameplayTagContainer& OutContainer);
@@ -415,14 +496,14 @@ public:
 	 * プリセットの TargetTags をタグ名配列から設定する（未登録タグ名は警告してスキップ。入力非空で全滅した場合は変更せず false）。
 	 * Set a preset's TargetTags from tag names (unregistered names are skipped with a warning; leaves the preset unchanged and returns false when non-empty input resolves to no tags).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "KawaiiPhysics|Editor|Preset")
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor|Preset")
 	static bool SetPresetTargetTags(
 		UKawaiiPhysicsPresetDataAsset* Preset,
 		const TArray<FName>& TagNames,
 		bool bExactMatch);
 
 	/** プリセットの説明文を設定 / Set the preset description. */
-	UFUNCTION(BlueprintCallable, Category = "KawaiiPhysics|Editor|Preset")
+	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor|Preset")
 	static bool SetPresetDescription(UKawaiiPhysicsPresetDataAsset* Preset, const FText& Description);
 
 	/** プリセットの説明文を取得 / Get the preset description. */
@@ -497,11 +578,11 @@ public:
 		UKawaiiPhysicsPresetDataAsset* TargetAsset);
 
 	/**
-	 * Preset の TargetTags がマッチするノードへ再適用する（TargetTags空なら対象なし）
-	 * Reapply a preset to nodes whose tags match the preset's TargetTags (empty TargetTags targets nothing).
+	 * Preset の TargetTags がマッチするノードへ適用する（TargetTags空なら対象なし）
+	 * Apply a preset to nodes whose tags match the preset's TargetTags (empty TargetTags targets nothing).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Kawaii Physics|Editor")
-	static int32 ReapplyPresetToProject(
+	static int32 ApplyPresetToProject(
 		UKawaiiPhysicsPresetDataAsset* Preset,
 		bool bDryRun,
 		bool bCheckOutFiles,

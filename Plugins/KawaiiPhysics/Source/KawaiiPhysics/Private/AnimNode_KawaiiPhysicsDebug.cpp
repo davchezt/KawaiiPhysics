@@ -211,6 +211,92 @@ void FAnimNode_KawaiiPhysics::AnimDrawDebug(FComponentSpacePoseContext& Output)
 					}
 #endif
 				}
+
+				// シンプルワールドコリジョン（水色）
+				if (bUseSimpleWorldCollision)
+				{
+					for (const auto& SphericalLimit : SimpleWorldSphericalLimits)
+					{
+						const FVector LocationWS =
+							ConvertSimulationSpaceLocation(Output, SimulationSpace,
+							                               EKawaiiPhysicsSimulationSpace::WorldSpace,
+							                               SphericalLimit.Location);
+						AnimInstanceProxy->AnimDrawDebugSphere(LocationWS, SphericalLimit.Radius, 8, FColor::Cyan,
+						                                       false, -1, LineThickness, SDPG_Foreground);
+					}
+
+					for (const auto& BoxLimit : SimpleWorldBoxLimits)
+					{
+						this->AnimDrawDebugBox(Output, BoxLimit.Location, BoxLimit.Rotation, BoxLimit.Extent,
+						                       FColor::Cyan, LineThickness);
+					}
+
+					for (const auto& BoxLimit : SimpleWorldGroundBoxLimits)
+					{
+						this->AnimDrawDebugBox(Output, BoxLimit.Location, BoxLimit.Rotation, BoxLimit.Extent,
+						                       FColor::Cyan, LineThickness);
+					}
+
+					for (const auto& ConvexLimit : SimpleWorldConvexLimits)
+					{
+#if !UE_BUILD_SHIPPING
+						if (!ConvexLimit.LocalVertices.IsEmpty() && !ConvexLimit.LocalEdges.IsEmpty())
+						{
+							const FTransform ConvexTransformWS =
+								ConvertSimulationSpaceTransform(Output, SimulationSpace,
+								                                EKawaiiPhysicsSimulationSpace::WorldSpace,
+								                                FTransform(ConvexLimit.Rotation,
+								                                           ConvexLimit.Location));
+							for (int32 EdgeIndex = 0; EdgeIndex + 1 < ConvexLimit.LocalEdges.Num(); EdgeIndex += 2)
+							{
+								const int32 IndexA = ConvexLimit.LocalEdges[EdgeIndex];
+								const int32 IndexB = ConvexLimit.LocalEdges[EdgeIndex + 1];
+								if (!ConvexLimit.LocalVertices.IsValidIndex(IndexA) ||
+									!ConvexLimit.LocalVertices.IsValidIndex(IndexB))
+								{
+									continue;
+								}
+
+								const FVector LocationAWS =
+									ConvexTransformWS.TransformPosition(ConvexLimit.LocalVertices[IndexA]);
+								const FVector LocationBWS =
+									ConvexTransformWS.TransformPosition(ConvexLimit.LocalVertices[IndexB]);
+								AnimInstanceProxy->AnimDrawDebugLine(LocationAWS, LocationBWS, FColor::Cyan,
+								                                     false, -1.0f, LineThickness, SDPG_Foreground);
+							}
+							continue;
+						}
+#endif
+
+						// DebugDraw CVar を後から有効にした場合、次回収集まで頂点/エッジが空のため LocalBounds で近似表示する。
+						this->AnimDrawDebugBox(Output, ConvexLimit.Location, ConvexLimit.Rotation,
+						                       ConvexLimit.LocalBounds.GetExtent(), FColor::Cyan, LineThickness);
+					}
+
+					for (const auto& TaperedCapsuleLimit : SimpleWorldTaperedCapsuleLimits)
+					{
+						this->AnimDrawDebugTaperedCapsule(Output, TaperedCapsuleLimit.Location,
+						                                  TaperedCapsuleLimit.Rotation, TaperedCapsuleLimit.Radius0,
+						                                  TaperedCapsuleLimit.Radius1, TaperedCapsuleLimit.Length,
+						                                  FColor::Cyan, LineThickness);
+					}
+
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+					for (const auto& CapsuleLimit : SimpleWorldCapsuleLimits)
+					{
+						FTransform CapsuleTransformWS =
+							ConvertSimulationSpaceTransform(Output, SimulationSpace,
+							                                EKawaiiPhysicsSimulationSpace::WorldSpace,
+							                                FTransform(CapsuleLimit.Rotation, CapsuleLimit.Location));
+						AnimInstanceProxy->AnimDrawDebugCapsule(CapsuleTransformWS.GetTranslation(),
+						                                        CapsuleLimit.Length * 0.5f,
+						                                        CapsuleLimit.Radius,
+						                                        CapsuleTransformWS.GetRotation().Rotator(),
+						                                        FColor::Cyan, false, -1, LineThickness,
+						                                        SDPG_Foreground);
+					}
+#endif
+				}
 			}
 		}
 	}
